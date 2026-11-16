@@ -151,6 +151,7 @@ struct AppAudioEffectDSP {
         count: AppAudioEffectEQ.bandCount
     )
     private var spatial: AppAudioSpatialDSP
+    private var dynamics: AppAudioDynamicsDSP
     private(set) var isWet = false
 
     init(sampleRate: Double) {
@@ -170,10 +171,12 @@ struct AppAudioEffectDSP {
         wetRamp = AppAudioEffectLinearRamp(sampleRate: sampleRate, initial: 0)
         preampRamp = AppAudioEffectLinearRamp(sampleRate: sampleRate, initial: 1)
         spatial = AppAudioSpatialDSP(sampleRate: sampleRate)
+        dynamics = AppAudioDynamicsDSP(sampleRate: sampleRate)
     }
 
     /// 每个回调只检查一次 EQ 与空间参数；未变化时不做任何系数换算。
-    mutating func beginBuffer(effectWord: UInt64, spatialWord: UInt64) {
+    mutating func beginBuffer(effectWord: UInt64, spatialWord: UInt64, dynamicsWord: UInt64) {
+        dynamics.beginBuffer(word: dynamicsWord)
         spatial.beginBuffer(word: spatialWord)
         guard effectWord != lastWord else { return }
         lastWord = effectWord
@@ -247,6 +250,12 @@ struct AppAudioEffectDSP {
                                           right: samples.right,
                                           channels: channels)
         samples = output
+    }
+
+    /// 动态和声道处理位于混响之后、最终峰值限制之前。
+    @inline(__always)
+    mutating func processDynamics(_ samples: inout (left: Float, right: Float), channels: Int) {
+        dynamics.process(&samples, channels: channels)
     }
 
     /// 前馈峰值 Limiter 在同一帧所有声道之间共享增益，避免左右声道音量像声像一样摆动。

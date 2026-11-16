@@ -74,6 +74,7 @@ public struct AppAudioSpatialSettings: Codable, Equatable, Sendable {
 
     public var mode: AppAudioSpatialMode
     public var intensity: Float
+    private var savedIntensities: [String: Float] = [:]
 
     public init(mode: AppAudioSpatialMode = .off,
                 intensity: Float = AppAudioSpatialSettings.defaultIntensity) {
@@ -90,14 +91,57 @@ public struct AppAudioSpatialSettings: Codable, Equatable, Sendable {
     }
 
     public var isValid: Bool {
-        intensity.isFinite
+        savedIntensities.allSatisfy { AppAudioSpatialMode(rawValue: $0.key)?.isEnabled == true && $0.value.isFinite && (Self.minimumIntensity...Self.maximumIntensity).contains($0.value) } && intensity.isFinite
             && (Self.minimumIntensity...Self.maximumIntensity).contains(intensity)
             && abs(intensity - Self.snappedIntensity(intensity)) < 0.001
     }
 
     public mutating func setIntensity(_ value: Float) {
         intensity = Self.snappedIntensity(value)
+        if mode.isEnabled { savedIntensities[mode.rawValue] = intensity }
     }
+
+    /// 各空间模式分别记住强度；旧配置切换到未保存的模式时沿用当前强度。
+    public mutating func selectMode(_ next: AppAudioSpatialMode) {
+        if mode.isEnabled { savedIntensities[mode.rawValue] = intensity }
+        mode = next
+        if next.isEnabled, let saved = savedIntensities[next.rawValue] { intensity = saved }
+    }
+
+    private enum CodingKeys: String, CodingKey { case mode, intensity, savedIntensities }
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        mode = try values.decode(AppAudioSpatialMode.self, forKey: .mode)
+        intensity = try values.decode(Float.self, forKey: .intensity)
+        savedIntensities = values.contains(.savedIntensities)
+            ? try values.decode([String: Float].self, forKey: .savedIntensities) : [:]
+    }
+}
+
+/// 动态处理按整个立体声帧联动，避免左右声像随音量摆动。
+public enum AppAudioDynamicsMode: String, Codable, CaseIterable, Sendable {
+    case off, light, strong, night
+}
+
+/// 平衡值 -1 表示仅左声道，1 表示仅右声道；单声道取左右平均。
+public struct AppAudioChannelSettings: Codable, Equatable, Sendable {
+    public var balance: Float = 0
+    public var mono: Bool = false
+    public var swap: Bool = false
+    public init(balance: Float = 0, mono: Bool = false, swap: Bool = false) {
+        self.balance = balance
+        self.mono = mono
+        self.swap = swap
+    }
+    private enum CodingKeys: String, CodingKey { case balance, mono, swap }
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        balance = try values.decode(Float.self, forKey: .balance)
+        mono = try values.decode(Bool.self, forKey: .mono)
+        // 已有声道配置没有交换字段，迁移时维持原有左右顺序。
+        swap = values.contains(.swap) ? try values.decode(Bool.self, forKey: .swap) : false
+    }
+    public var isValid: Bool { balance.isFinite && (-1...1).contains(balance) }
 }
 
 /// 固定十个频段，数组顺序就是界面从左到右的顺序。
@@ -204,15 +248,21 @@ public struct AppAudioEffectSettings: Codable, Equatable, Sendable {
     public var preset: AppAudioEffectPresetSelection
     public var eq: AppAudioEffectEQ
     public var spatial: AppAudioSpatialSettings
+    public var dynamics: AppAudioDynamicsMode
+    public var channel: AppAudioChannelSettings
 
     public init(enabled: Bool = false,
                 preset: AppAudioEffectPresetSelection = .builtIn(.flat),
                 eq: AppAudioEffectEQ = .flat,
-                spatial: AppAudioSpatialSettings = .disabled) {
+                spatial: AppAudioSpatialSettings = .disabled,
+                dynamics: AppAudioDynamicsMode = .off,
+                channel: AppAudioChannelSettings = .init()) {
         self.enabled = enabled
         self.preset = preset
         self.eq = eq.snapped
         self.spatial = spatial
+        self.dynamics = dynamics
+        self.channel = channel
     }
 
     public init(enabled: Bool = false, preset: AppAudioEffectPreset) {
@@ -224,6 +274,8 @@ public struct AppAudioEffectSettings: Codable, Equatable, Sendable {
         case preset
         case eq
         case spatial
+        case dynamics
+        case channel
         case lowGainDB
         case midGainDB
         case highGainDB
@@ -262,6 +314,11 @@ public struct AppAudioEffectSettings: Codable, Equatable, Sendable {
             eq = migrated.eq
             spatial = .disabled
         }
+        // 旧版没有这两个字段；明确迁移到不改变原声的状态。
+        dynamics = container.contains(.dynamics)
+            ? try container.decode(AppAudioDynamicsMode.self, forKey: .dynamics) : .off
+        channel = container.contains(.channel)
+            ? try container.decode(AppAudioChannelSettings.self, forKey: .channel) : .init()
         guard isValid else {
             throw DecodingError.dataCorrupted(
                 DecodingError.Context(codingPath: decoder.codingPath,
@@ -276,6 +333,8 @@ public struct AppAudioEffectSettings: Codable, Equatable, Sendable {
         try container.encode(preset, forKey: .preset)
         try container.encode(eq, forKey: .eq)
         try container.encode(spatial, forKey: .spatial)
+        try container.encode(dynamics, forKey: .dynamics)
+        try container.encode(channel, forKey: .channel)
     }
 
     public static let disabled = AppAudioEffectSettings()
@@ -287,7 +346,7 @@ public struct AppAudioEffectSettings: Codable, Equatable, Sendable {
 
     /// 持久化层在写入和回读时都使用同一套范围校验，拒绝损坏数据而不是静默修正。
     public var isValid: Bool {
-        guard eq.isValid, spatial.isValid else { return false }
+        guard eq.isValid, spatial.isValid, channel.isValid else { return false }
         if case .builtIn(let preset) = self.preset {
             return eq.matches(preset)
         }
