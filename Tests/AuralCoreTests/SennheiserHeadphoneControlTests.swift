@@ -152,20 +152,26 @@ struct SennheiserHeadphoneControlTests {
         #expect(fixture.controller.diagnosticLines.filter { $0.hasPrefix("ERROR") }.count == 1)
     }
 
-    @Test func clientClassifiesAReadbackTimeoutAsRetryable() async {
+    @Test(.timeLimit(.minutes(1))) func clientClassifiesAReadbackTimeoutAsRetryable() async {
         let transport = SennheiserTestTransport()
-        let client = SennheiserClient(transport: transport, requestTimeout: .milliseconds(30))
-        var failures: [(String, Bool)] = []
-        client.onConnectionChange = { status in
-            if case let .failed(message, retryable) = status { failures.append((message, retryable)) }
+        var waitedDuration: Duration?
+        let client = SennheiserClient(transport: transport, requestTimeout: .milliseconds(30),
+                                      waitForTimeout: { duration in
+            // 无需依赖真实时钟；仍然核验客户端传给等待策略的超时时间。
+            waitedDuration = duration
+        })
+        let failure: (String, Bool) = await withCheckedContinuation { continuation in
+            client.onConnectionChange = { status in
+                if case let .failed(message, retryable) = status {
+                    continuation.resume(returning: (message, retryable))
+                }
+            }
+            client.connect(address: "11:22:33:44:55:66", outputUID: "11-22-33-44-55-66:output")
+            transport.onStatusChange?(.connected)
         }
-        client.connect(address: "11:22:33:44:55:66", outputUID: "11-22-33-44-55-66:output")
-        transport.onStatusChange?(.connected)
-        transport.receive(frame(command: 0x1306, payload: Array("ACAEBT\0".utf8)))
-        try? await Task.sleep(for: .milliseconds(100))
-        #expect(failures.count == 1)
-        #expect(failures.first?.0 == "森海塞尔控制命令回读超时")
-        #expect(failures.first?.1 == true)
+        #expect(waitedDuration == .milliseconds(30))
+        #expect(failure.0 == "森海塞尔控制命令回读超时")
+        #expect(failure.1 == true)
         client.disconnect()
     }
 

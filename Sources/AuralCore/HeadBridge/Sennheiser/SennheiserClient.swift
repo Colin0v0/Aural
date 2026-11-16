@@ -33,6 +33,8 @@ final class SennheiserClient {
     }
     private let transport: any SennheiserControlTransport
     private let requestTimeout: Duration
+    /// 等待策略可注入，测试可以直接触发超时而无需依赖机器调度速度。
+    private let waitForTimeout: @MainActor (Duration) async throws -> Void
     private var decoder = SennheiserGAIADecoder()
     private var queue: [Request] = []
     private var current: Request?
@@ -45,9 +47,13 @@ final class SennheiserClient {
     private var stopping = false
 
     init(transport: any SennheiserControlTransport,
-         requestTimeout: Duration = .seconds(5)) {
+         requestTimeout: Duration = .seconds(5),
+         waitForTimeout: @escaping @MainActor (Duration) async throws -> Void = { duration in
+             try await Task.sleep(for: duration)
+         }) {
         self.transport = transport
         self.requestTimeout = requestTimeout
+        self.waitForTimeout = waitForTimeout
         transport.onStatusChange = { [weak self] in self?.connectionChanged($0) }
         transport.onData = { [weak self] in self?.receive($0) }
     }
@@ -118,8 +124,9 @@ final class SennheiserClient {
         if request.purpose == .verifyTransparency { onNoiseVerificationSent?() }
         timeout?.cancel()
         let timeoutDuration = requestTimeout
+        let waitForTimeout = self.waitForTimeout
         timeout = Task { @MainActor [weak self] in
-            do { try await Task.sleep(for: timeoutDuration) } catch { return }
+            do { try await waitForTimeout(timeoutDuration) } catch { return }
             guard let self, !Task.isCancelled, self.generation == expected else { return }
             self.fail("森海塞尔控制命令回读超时", retryable: true)
         }
