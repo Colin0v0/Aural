@@ -75,7 +75,7 @@ struct OutputRoutingIntegrationTests {
         #expect(model.shutdown())
     }
 
-    @Test func sustainedSnapshotPendingStillReportsAfterTheSettleWindow() {
+    @Test func sustainedSnapshotPendingRemainsSilentAndRecovers() {
         let hardware = RoutingTestHardware()
         let audio = SessionFixture()
         let model = AppModel(outputHardware: hardware.hardware, startsMonitoring: false,
@@ -86,13 +86,21 @@ struct OutputRoutingIntegrationTests {
         #expect(model.outputRouting.phase == .stable)
         #expect(model.audioError == nil)
 
-        // 超过三秒仍未收敛就是真实读取失败，必须显示错误，不能无限等待或伪装成功。
-        audio.now = audio.now.addingTimeInterval(3.1)
+        // 被动断连超过快速观察窗口仍保持静默；恢复后必须使用新的设备事实。
+        let initialAudio = model.audio
+        audio.now = audio.now.addingTimeInterval(30)
         model.refresh()
-        #expect(model.audio == nil)
-        #expect(model.audioError != nil)
-        #expect(model.outputRouting.phase == .failed)
-        #expect(model.outputRouting.error != nil)
+        #expect(model.audio == initialAudio)
+        #expect(model.audioError == nil)
+        #expect(model.outputRouting.phase == .stable)
+        #expect(model.outputRouting.error == nil)
+        hardware.selected = 2
+        hardware.systemSelected = 2
+        hardware.pendingSnapshot = false
+        model.refresh()
+        #expect(model.audio?.selectedID == 2)
+        #expect(model.audioError == nil)
+        #expect(model.outputRouting.error == nil)
         #expect(model.shutdown())
     }
 

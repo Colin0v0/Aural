@@ -7,6 +7,47 @@ import Testing
 struct OutputRoutingControllerTests {
     private let start = Date(timeIntervalSince1970: 1_000)
 
+    @Test func transientObservationErrorWaitsAndRecoversWithoutSelectingAnotherDevice() {
+        let fixture = RoutingTestHardware()
+        let controller = OutputRoutingController(hardware: fixture.hardware)
+        controller.observe(fixture.snapshot, at: start)
+        fixture.failSystemRead = true
+        controller.observe(fixture.snapshot, at: start.addingTimeInterval(1))
+        #expect(controller.hasPendingObservation)
+        #expect(controller.state.error == nil)
+        #expect(fixture.selections.isEmpty)
+        fixture.failSystemRead = false
+        controller.observe(fixture.snapshot, at: start.addingTimeInterval(2))
+        #expect(!controller.hasPendingObservation)
+        #expect(controller.state.phase == .stable)
+        #expect(controller.state.error == nil)
+        #expect(fixture.selections.isEmpty)
+    }
+
+    @Test func prolongedObservationIsSilentAndRecoversFromFreshFacts() {
+        let fixture = RoutingTestHardware()
+        let controller = OutputRoutingController(hardware: fixture.hardware)
+        controller.observe(fixture.snapshot, at: start)
+        fixture.failSystemRead = true
+        controller.observe(fixture.snapshot, at: start.addingTimeInterval(1))
+        controller.observe(fixture.snapshot, at: start.addingTimeInterval(4))
+        #expect(controller.state.phase == .stable)
+        #expect(controller.state.error == nil)
+        #expect(controller.hasPendingObservation)
+        #expect(!controller.needsFastObservation(at: start.addingTimeInterval(4)))
+        fixture.failSystemRead = false
+        controller.observe(fixture.snapshot, at: start.addingTimeInterval(5))
+        #expect(controller.state.phase == .stable)
+        #expect(controller.state.error == nil)
+        #expect(controller.state.confirmed?.output.uid == "speaker")
+        controller.observationFailed(AudioSnapshotPending(AudioFailure("设备暂不可用", status: HAL.badObjectStatus)))
+        #expect(controller.state.phase == .failed)
+        controller.observe(fixture.snapshot, at: start.addingTimeInterval(6))
+        #expect(controller.state.phase == .stable)
+        #expect(controller.state.error == nil)
+        #expect(fixture.selections.isEmpty)
+    }
+
     @Test func selectingAlreadyConfirmedRouteDoesNotStopSessionsOrRebuildResources() {
         for intent: OutputRoutingIntent in [.single("speaker"), .simultaneous(["speaker", "headphone"])] {
             let fixture = RoutingTestHardware()
@@ -898,6 +939,7 @@ final class RoutingTestHardware {
     var afterCreate: ((AudioDeviceID) -> Void)?
     var afterSelection: ((AudioDeviceID) -> Void)?
     var worn: [AudioDeviceID: Bool] = [:]
+    var failSystemRead = false
     var failSnapshot = false
     var pendingSnapshot = false
     var snapshotReads = 0
@@ -936,7 +978,10 @@ final class RoutingTestHardware {
                 throw AudioSnapshotPending(AudioFailure("读取音频名称失败", status: HAL.badObjectStatus))
             }
             return self.snapshot
-        }, selectedSystemOutputID: { self.systemSelected },
+        }, selectedSystemOutputID: {
+            if self.failSystemRead { throw AudioFailure("读取音频属性失败", status: HAL.badObjectStatus) }
+            return self.systemSelected
+        },
             activePlaybackDeviceIDs: { self.activePlayback }, isWorn: { self.worn[$0] }, sampleRate: { _ in 48_000 },
             isAlive: { !self.offline.contains($0) }, configuration: { id in
                 guard let composition = self.compositions[id],

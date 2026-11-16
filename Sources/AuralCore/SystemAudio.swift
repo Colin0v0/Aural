@@ -23,8 +23,8 @@ public struct AudioSnapshotPending: LocalizedError {
 public enum HAL {
     public static let system = AudioObjectID(kAudioObjectSystemObject)
     private static let serverRestartedStatus = OSStatus(-308)
-    /// Core Audio 的 `who?`：列表给出对象后，对象在逐项读取前已经被系统销毁或替换。
-    public static let badObjectStatus = OSStatus(0x77686F3F)
+    /// Core Audio 的 `!obj`：列表给出对象后，对象在逐项读取前已经被系统销毁或替换。
+    public static let badObjectStatus = OSStatus(kAudioHardwareBadObjectError)
 
     public static func address(_ selector: AudioObjectPropertySelector,
                                scope: AudioObjectPropertyScope = kAudioObjectPropertyScopeGlobal,
@@ -279,7 +279,7 @@ public enum SystemAudio {
                         }
                         throw error
                     }
-                    // 聚合设备销毁时 HAL 可能短暂保留旧对象；只对明确的 `who?` 等待一个短窗口。
+                    // 聚合设备销毁时 HAL 可能短暂保留旧对象；只对明确的 `!obj` 等待一个短窗口。
                     if let failure = error as? AudioFailure, failure.status == HAL.badObjectStatus {
                         Thread.sleep(forTimeInterval: 0.03)
                     }

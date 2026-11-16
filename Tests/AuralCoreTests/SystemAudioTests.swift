@@ -3,6 +3,12 @@ import CoreAudio
 @testable import AuralCore
 
 struct SystemAudioTests {
+    @Test func badObjectStatusMatchesCoreAudioDisconnectError() {
+        // 使用实际错误码，避免测试和实现同时误把未知属性 `who?` 当成失效对象。
+        #expect(HAL.badObjectStatus == 560_947_818)
+        #expect(HAL.badObjectStatus != OSStatus(kAudioHardwareUnknownPropertyError))
+    }
+
     @Test func invalidObjectStillListedProducesPendingSnapshotInsteadOfPartialSuccess() {
         var nameReads = 0
         do {
@@ -272,5 +278,5 @@ struct SystemAudioTests {
         #expect(!SystemAudio.activeAggregateRouteContains("other", composition: composition as CFDictionary, activeUIDs: ["other"]))
     }
 
-    @Test func versionIsDefined() { #expect(AuralVersion.current == "0.3.2") }
+    @Test func versionIsDefined() { #expect(AuralVersion.current == "0.3.3") }
 }
