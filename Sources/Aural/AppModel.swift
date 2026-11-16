@@ -233,7 +233,8 @@ final class AppModel: ObservableObject {
     func refresh() {
         guard !isShutdown else { return }
         refreshAudio()
-        guard applicationEnvironment != nil else { return }
+        guard applicationEnvironment != nil, pendingAudioSnapshotDeadline == nil,
+              !routing.hasPendingObservation else { return }
         refreshApplicationState()
     }
 
@@ -242,7 +243,8 @@ final class AppModel: ObservableObject {
     private func refreshForPeriodicTimer() {
         guard !isShutdown else { return }
         refreshAudio()
-        guard applicationEnvironment != nil, shouldRefreshApplicationStateDuringPolling else { return }
+        guard applicationEnvironment != nil, shouldRefreshApplicationStateDuringPolling,
+              pendingAudioSnapshotDeadline == nil, !routing.hasPendingObservation else { return }
         refreshApplicationState()
     }
 
@@ -336,6 +338,11 @@ final class AppModel: ObservableObject {
             pendingAudioSnapshotDeadline = nil
             let previous = outputRouting.confirmed
             routing.observe(fresh, at: routingNow)
+            if routing.hasPendingObservation {
+                // 尚未确认路由事实，不用旧确认结果重绑应用会话。
+                updateRouteConfirmationActivity()
+                return
+            }
             guard let observed = routing.latestSnapshot else { throw AudioFailure("无法读回当前路由快照") }
             if audio != observed { audio = observed }
             if audioError != nil { audioError = nil }
@@ -366,18 +373,14 @@ final class AppModel: ObservableObject {
                 updateRouteConfirmationActivity()
                 return
             }
-            // 稳定状态下的蓝牙重连也可能短暂读到“默认设备还未出现在输出列表”。
-            // 保持现有界面并短周期重读，避免一次正常的 HAL 过渡被锁存成红色失败。
-            if error is AudioSnapshotPending,
-               !outputRouting.phase.isBusy,
-               outputRouting.phase != .failed {
+            // 被动上下线没有用户操作失败：静默等待真实设备枚举恢复。
+            // 三秒内快速观察，之后仅使用常规轮询，避免设备离线时一直高频刷新。
+            if error is AudioSnapshotPending, !outputRouting.phase.isBusy {
                 if pendingAudioSnapshotDeadline == nil {
                     pendingAudioSnapshotDeadline = routingNow.addingTimeInterval(3)
                 }
-                if let deadline = pendingAudioSnapshotDeadline, routingNow < deadline {
-                    updateRouteConfirmationActivity()
-                    return
-                }
+                updateRouteConfirmationActivity()
+                return
             }
             pendingAudioSnapshotDeadline = nil
             routing.observationFailed(error)
@@ -396,7 +399,8 @@ final class AppModel: ObservableObject {
         guard monitorsSystem,
               outputRouting.phase.isBusy
                 || routing.hasPendingRelease && outputRouting.phase != .failed
-                || pendingAudioSnapshotDeadline != nil else {
+                || pendingAudioSnapshotDeadline.map({ routingNow < $0 }) == true
+                || routing.needsFastObservation(at: routingNow) else {
             routeConfirmationTimer?.invalidate(); routeConfirmationTimer = nil
             return
         }
@@ -406,7 +410,9 @@ final class AppModel: ObservableObject {
                 guard let self else { return }
                 self.refreshAudio()
                 // 过渡期间只观察路由；不能以 20Hz 反复枚举全部 APP、输入设备或启动 tap。
-                if !self.outputRouting.phase.isBusy, !self.routing.hasPendingRelease, self.applicationEnvironment != nil {
+                if !self.outputRouting.phase.isBusy, !self.routing.hasPendingRelease,
+                   self.pendingAudioSnapshotDeadline == nil, !self.routing.hasPendingObservation,
+                   self.applicationEnvironment != nil {
                     self.refreshApplicationState()
                 }
             }

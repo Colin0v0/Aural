@@ -102,6 +102,14 @@ public final class OutputRoutingController {
     public var isUserSelectingOutput: (() -> Bool)?
     public var retainedRoute: MultiOutputRoute? { resources.route }
     public var hasPendingRelease: Bool { resources.hasPendingRelease }
+    /// 只读观察遇到失效对象时，要求界面以短周期重新枚举。
+    public var hasPendingObservation: Bool { observationDeadline != nil }
+    /// 短时密集观察后回到正常轮询，长时间离线也不持续占用主线程。
+    public func needsFastObservation(at now: Date) -> Bool {
+        observationDeadline.map { now < $0 } == true
+    }
+    private var observationDeadline: Date?
+    private var recoverableObservationFailure = false
     private let hardware: MultiOutputHardware
     private let resources: MultiOutputDevice
     private let confirmationTimeout: TimeInterval
@@ -145,6 +153,8 @@ public final class OutputRoutingController {
     private func performRequest(_ intent: OutputRoutingIntent, at now: Date,
                                 updatesConfiguration: Bool) {
         if state.phase.isBusy { state.queued = intent; return }
+        recoverableObservationFailure = false
+        observationDeadline = nil
         do {
             let snapshot = try hardware.snapshot()
             resources.recordUnmanagedOutputs(in: snapshot)
@@ -210,9 +220,17 @@ public final class OutputRoutingController {
         refreshConfirmedHandles(in: snapshot)
         // 蓝牙重连可能换掉 HAL 句柄；资源层也必须按 UID 跟随同一台设备。
         _ = resources.refreshHandles(snapshot: snapshot)
+        var observationSucceeded = true
+        defer { if observationSucceeded { observationDeadline = nil } }
         do {
             let systemSelected = try hardware.selectedSystemOutputID()
             state.actualSystemOutputID = systemSelected
+            if recoverableObservationFailure {
+                // 只恢复观察失败，不重放上一次写操作，也不把旧路由当作已确认。
+                recoverableObservationFailure = false
+                state.phase = .stable
+                state.error = nil
+            }
             if state.phase.isBusy, let step {
                 // 资源释放有自己的确认阶段：不再用 destroy 后的第一份枚举判定永久失败。
                 switch step {
@@ -426,7 +444,19 @@ public final class OutputRoutingController {
                 state.confirmed = ConfirmedOutputRoute(intent: .single(actual.uid), output: actual, aggregate: nil)
             }
             updateCleanup(snapshot)
-        } catch { failReadingActual(error, at: now) }
+        } catch {
+            // 仅延迟只读属性中的失效对象；写入失败和切换中的失败不能被掩盖。
+            if !state.phase.isBusy, let failure = error as? AudioFailure,
+               failure.status == HAL.badObjectStatus,
+               failure.message.hasPrefix("读取音频") || failure.message.hasPrefix("查询音频") {
+                observationSucceeded = false
+                if observationDeadline == nil { observationDeadline = now.addingTimeInterval(confirmationTimeout) }
+                // 被动观察没有执行切换写入，设备离线多久都不是需要打扰用户的操作失败。
+                // 后续周期刷新仍会读取真实状态，不会依靠旧句柄继续执行操作。
+                return
+            }
+            failReadingActual(error, at: now)
+        }
     }
 
     /// 明确结束模式时保留当前唯一设备；组合则请求原来那台设备，不猜断连后的替代目标。
@@ -491,6 +521,9 @@ public final class OutputRoutingController {
     }
 
     public func observationFailed(_ error: Error) {
+        // 仅设备枚举未收敛且没有正在执行的切换时，允许下一份有效观察清除错误。
+        recoverableObservationFailure = error is AudioSnapshotPending && !state.phase.isBusy
+        observationDeadline = nil
         fail(error, snapshot: nil, at: Date())
     }
 
