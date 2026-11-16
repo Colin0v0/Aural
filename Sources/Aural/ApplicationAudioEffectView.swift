@@ -6,6 +6,8 @@ import AuralCore
 enum ApplicationAudioEffectPage: Hashable, CaseIterable {
     case equalizer
     case spatial
+    case dynamics
+    case channel
 }
 
 /// 独立音效窗口保留主面板的排版语言：小幅频响预览配合十根经典 EQ 推子。
@@ -72,7 +74,7 @@ struct ApplicationAudioEffectView: View {
                                        onPreview: previewGain,
                                        onCommit: commitGain)
                         .frame(height: heights.fader)
-                } else {
+                } else if presentation.page == .spatial {
                     SpatialEffectPage(
                         appName: appName,
                         settings: draft.settings.spatial,
@@ -82,6 +84,10 @@ struct ApplicationAudioEffectView: View {
                         onModeChange: commitSpatialMode
                     )
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else if presentation.page == .dynamics {
+                    dynamicsPage
+                } else {
+                    channelPage
                 }
                 if let error = model.operationError {
                     PanelError(text: L10n.text(error, language: language))
@@ -151,6 +157,20 @@ struct ApplicationAudioEffectView: View {
                     .lineLimit(1)
             }
             Spacer(minLength: 16)
+            Button {
+                model.setApplicationAudioEffectBypassed(
+                    !model.isApplicationAudioEffectBypassed(for: applicationID),
+                    for: applicationID
+                )
+            } label: {
+                Label(L10n.text("对比原声", language: language),
+                      systemImage: model.isApplicationAudioEffectBypassed(for: applicationID)
+                          ? "waveform" : "waveform.badge.minus")
+            }
+            .buttonStyle(PanelButtonStyle(prominent: model.isApplicationAudioEffectBypassed(for: applicationID)))
+            .disabled(!draft.settings.enabled || !model.applicationEffectsEnabled)
+            .help(L10n.text("临时对比未处理的声音，不修改已保存设置", language: language))
+
             PanelBooleanControl(isOn: enabledBinding)
                 .frame(width: 112)
                 .accessibilityLabel(L10n.text("启用应用音效", language: language))
@@ -165,11 +185,113 @@ struct ApplicationAudioEffectView: View {
                 switch page {
                 case .equalizer: return L10n.text("均衡器", language: language)
                 case .spatial: return L10n.text("空间", language: language)
+                case .dynamics: return L10n.text("动态", language: language)
+                case .channel: return L10n.text("声道", language: language)
                 }
             },
             select: { presentation.page = $0 }
         )
         .frame(maxWidth: .infinity)
+    }
+
+    /// 动态页收拢控件宽度，保留简短说明和清晰的当前选项。
+    private var dynamicsPage: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .center, spacing: 16) {
+                VStack(alignment: .leading, spacing: 5) {
+                    Label(L10n.text("音量均衡", language: language), systemImage: "waveform")
+                        .font(.system(size: 15, weight: .semibold))
+                    Text(L10n.text("减少声音忽大忽小。", language: language))
+                        .font(PanelStyle.bodyFont).foregroundStyle(PanelStyle.secondary)
+                }
+                Spacer(minLength: 16)
+                PanelSegmentedControl(
+                    items: AppAudioDynamicsMode.allCases,
+                    selection: Binding(get: { draft.settings.dynamics }, set: { mode in
+                        var next = draft.settings
+                        next.dynamics = mode
+                        commit(next)
+                    }),
+                    title: { mode in
+                        switch mode {
+                        case .off: return L10n.text("关闭", language: language)
+                        case .light: return L10n.text("轻度", language: language)
+                        case .strong: return L10n.text("强", language: language)
+                        case .night: return L10n.text("夜间", language: language)
+                        }
+                    }
+                ).frame(width: 300)
+                .accessibilityLabel(L10n.text("音量均衡", language: language))
+            }
+            Spacer(minLength: 0)
+        }.padding(.top, 18).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+
+    private var channelPage: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            // 平衡与开关各成一组，避免开关和滑块在整页分散排列。
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Label(L10n.text("左右平衡", language: language), systemImage: "headphones")
+                        .font(.system(size: 15, weight: .semibold))
+                    Spacer()
+                    Text(balanceText).font(PanelStyle.bodyFont.monospacedDigit())
+                        .foregroundStyle(PanelStyle.secondary)
+                }
+                Text(L10n.text("调整左右声音的大小。", language: language))
+                    .font(PanelStyle.bodyFont).foregroundStyle(PanelStyle.secondary)
+                PanelVolumeSlider(value: Binding(
+                    get: { Double((draft.settings.channel.balance + 1) / 2) },
+                    set: { value in
+                        var next = draft.settings
+                        next.channel.balance = (Float(value) * 200 - 100).rounded() / 100
+                        draft.settings = next
+                        model.previewApplicationAudioEffect(next, for: applicationID)
+                    }), label: L10n.text("左右平衡", language: language),
+                    accessibilityValueText: balanceText, centered: true,
+                    onEditingChanged: { editing in if !editing { commit(draft.settings) } })
+                HStack {
+                    Text(L10n.text("左", language: language))
+                    Spacer()
+                    Button(L10n.text("居中", language: language)) {
+                        var next = draft.settings
+                        next.channel.balance = 0
+                        commit(next)
+                    }.buttonStyle(PanelButtonStyle())
+                    Spacer()
+                    Text(L10n.text("右", language: language))
+                }.font(PanelStyle.bodyFont).foregroundStyle(PanelStyle.secondary)
+            }
+            Rectangle().fill(PanelStyle.line).frame(height: 1)
+            VStack(spacing: 0) {
+                channelOption(title: "单声道", description: "左右播放相同声音。",
+                              value: Binding(get: { draft.settings.channel.mono }, set: { value in
+                    var next = draft.settings
+                    next.channel.mono = value
+                    commit(next)
+                }))
+                channelOption(title: "交换左右声道", description: "对调左右声音。",
+                              value: Binding(get: { draft.settings.channel.swap }, set: { value in
+                    var next = draft.settings
+                    next.channel.swap = value
+                    commit(next)
+                }))
+            }
+            Spacer(minLength: 0)
+        }.padding(.top, 18).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+
+    /// 与设置页使用相同的行布局：说明在左，开关始终靠右。
+    private func channelOption(title: String, description: String, value: Binding<Bool>) -> some View {
+        SettingsToggleRow(title: L10n.text(title, language: language),
+                          detail: L10n.text(description, language: language),
+                          isOn: value)
+    }
+
+    private var balanceText: String {
+        let value = Int((draft.settings.channel.balance * 100).rounded())
+        if value == 0 { return L10n.text("居中", language: language) }
+        return "\(L10n.text(value < 0 ? "左" : "右", language: language)) \(abs(value))%"
     }
 
     private var presetToolbar: some View {
@@ -234,20 +356,6 @@ struct ApplicationAudioEffectView: View {
             }
 
             Spacer(minLength: 8)
-            Button {
-                model.setApplicationAudioEffectBypassed(
-                    !model.isApplicationAudioEffectBypassed(for: applicationID),
-                    for: applicationID
-                )
-            } label: {
-                Label(L10n.text("对比原声", language: language),
-                      systemImage: model.isApplicationAudioEffectBypassed(for: applicationID)
-                          ? "waveform" : "waveform.badge.minus")
-            }
-            .buttonStyle(PanelButtonStyle(prominent: model.isApplicationAudioEffectBypassed(for: applicationID)))
-            .disabled(!draft.settings.enabled || !model.applicationEffectsEnabled)
-            .help(L10n.text("临时对比未处理的声音，不修改已保存设置", language: language))
-
             Button(L10n.text("重置", language: language)) {
                 var next = draft.settings
                 next.apply(.flat)
@@ -372,7 +480,7 @@ struct ApplicationAudioEffectView: View {
     /// 空间模式不属于 EQ 预设；切换模式不会改变当前均衡器或自定义预设引用。
     private func commitSpatialMode(_ mode: AppAudioSpatialMode) {
         var next = draft.settings
-        next.spatial.mode = mode
+        next.spatial.selectMode(mode)
         commit(next)
     }
 
@@ -411,16 +519,10 @@ private struct SpatialEffectPage: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
-            HStack(spacing: 10) {
-                Image(systemName: "dot.radiowaves.left.and.right")
-                    .font(.system(size: 18, weight: .regular))
-                    .foregroundStyle(PanelStyle.accent)
-                    .frame(width: 30, height: 30)
-                    .background(PanelStyle.iconSurface, in: RoundedRectangle(cornerRadius: 8))
-                Text(L10n.text("空间效果", language: language))
-                    .font(.system(size: 15, weight: .semibold))
-                Spacer(minLength: 0)
-            }
+            // 三个页面的标题共用同样的图标尺寸与文字基线。
+            Label(L10n.text("空间效果", language: language),
+                  systemImage: "dot.radiowaves.left.and.right")
+                .font(.system(size: 15, weight: .semibold))
 
             PanelSegmentedControl(
                 items: AppAudioSpatialMode.allCases,

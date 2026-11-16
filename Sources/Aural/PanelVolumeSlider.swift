@@ -7,6 +7,8 @@ struct PanelVolumeSlider: View {
     let label: String
     /// 音效增益不是百分比，可注入 dB 文案；普通设备与应用音量继续使用百分比。
     var accessibilityValueText: String? = nil
+    /// 平衡控制从中点向左右填充，普通音量条继续从左侧填充。
+    var centered: Bool = false
     /// 需要区分实时预览和最终落盘的页面可在拖动结束时提交配置。
     var onEditingChanged: (Bool) -> Void = { _ in }
     @Environment(\.isEnabled) private var isEnabled
@@ -23,10 +25,18 @@ struct PanelVolumeSlider: View {
             let width = max(1, geometry.size.width - 6)
             ZStack(alignment: .leading) {
                 Capsule().fill(PanelStyle.line)
-                Capsule().fill(PanelStyle.accent).frame(width: width * value)
-                Circle().fill(PanelStyle.accent).frame(width: 6, height: 6)
-                    .offset(x: width * value - 3)
-                    .opacity(hover.active || focused ? 1 : 0)
+                if centered {
+                    Capsule().fill(PanelStyle.accent)
+                        .frame(width: width * abs(value - 0.5))
+                        .offset(x: width * min(value, 0.5))
+                    Capsule().fill(PanelStyle.secondary.opacity(0.6))
+                        .frame(width: 2, height: 10).offset(x: width / 2 - 1)
+                } else {
+                    Capsule().fill(PanelStyle.accent).frame(width: width * value)
+                }
+                Circle().fill(PanelStyle.accent).frame(width: centered ? 10 : 6, height: centered ? 10 : 6)
+                    .offset(x: width * value - (centered ? 5 : 3))
+                    .opacity(centered || hover.active || focused ? 1 : 0)
             }
             .frame(width: width, height: 3)
             .position(x: geometry.size.width / 2, y: geometry.size.height / 2)
