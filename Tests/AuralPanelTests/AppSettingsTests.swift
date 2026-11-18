@@ -19,6 +19,7 @@ struct AppSettingsTests {
         #expect(!settings.showSimultaneousOutput)
         #expect(!settings.appAudioEffectsEnabled)
         #expect(settings.menuBarBatterySource == .off)
+        #expect(!settings.showMenuBarDeviceIcon)
     }
 
     @Test func settingsPersistAcrossInstances() throws {
@@ -34,6 +35,7 @@ struct AppSettingsTests {
         settings.showSimultaneousOutput = false
         settings.appAudioEffectsEnabled = true
         settings.menuBarBatterySource = .pinned(deviceUID: "Bluetooth:AA-BB-CC-DD-EE-01")
+        settings.showMenuBarDeviceIcon = true
 
         let restored = AppSettings(defaults: defaults)
         #expect(restored.language == .english)
@@ -42,6 +44,7 @@ struct AppSettingsTests {
         #expect(!restored.showSimultaneousOutput)
         #expect(restored.appAudioEffectsEnabled)
         #expect(restored.menuBarBatterySource == .pinned(deviceUID: "Bluetooth:AA-BB-CC-DD-EE-01"))
+        #expect(restored.showMenuBarDeviceIcon)
     }
 
     @Test(arguments: ["zh-Hans", "zh-Hant", "en-US", "ja-JP"])
@@ -67,6 +70,9 @@ struct AppSettingsTests {
         #expect(L10n.format("多设备输出 · %d 台", language: .english, arguments: [2])
                 == "Multi-Device Output · 2 Devices")
         #expect(L10n.text("菜单栏电量", language: .english) == "Menu Bar Battery")
+        #expect(L10n.text("菜单栏设备图标", language: .english) == "Menu Bar Device Icon")
+        #expect(L10n.text("开启后，图标会显示当前使用的电脑、耳机或显示器。", language: .english)
+                == "Shows the current computer, headphones, or display.")
         #expect(L10n.text("跟随当前输出", language: .english) == "Follow Current Output")
         #expect(L10n.text("不显示", language: .english) == "Don't Show")
         #expect(L10n.format("固定：%@", language: .english, arguments: ["AirPods"])
@@ -207,7 +213,7 @@ struct AppSettingsTests {
     @Test func settingsWindowUsesTheDeclaredFixedSize() {
         let size = SettingsMetrics.size
         #expect(size.width == 500)
-        #expect(size.height == 520)
+        #expect(size.height == 572)
     }
 
     @Test func englishSettingDescriptionsFitOneLine() {

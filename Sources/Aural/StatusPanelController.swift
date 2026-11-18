@@ -78,6 +78,11 @@ final class StatusPanelController: NSObject {
             .sink { [weak self] _ in
                 MainActor.assumeIsolated { self?.updateStatusItemBattery() }
             })
+        statusBatteryCancellables.insert(AppSettings.shared.$showMenuBarDeviceIcon
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in
+                MainActor.assumeIsolated { self?.updateStatusItemBattery() }
+            })
         statusBatteryCancellables.insert(AppSettings.shared.$language
             .receive(on: RunLoop.main)
             .sink { [weak self] _ in
@@ -295,6 +300,14 @@ final class StatusPanelController: NSObject {
         guard let button = statusItem.button else { return }
         let settings = AppSettings.shared
         let candidate = model.menuBarBattery(for: settings.menuBarBatterySource)
+        if settings.showMenuBarDeviceIcon,
+           let systemName = model.menuBarDeviceSymbol() {
+            button.image = AuralStatusIcon.device(systemName: systemName)
+        } else {
+            // 未开启设备图标或当前没有可用输出时，明确显示 Aural 品牌图标。
+            button.image = AuralStatusIcon.make()
+        }
+        button.image?.accessibilityDescription = "Aural 音频控制"
         button.title = StatusItemBatteryText.title(reading: candidate?.reading)
         let actionHint = L10n.text("左键打开/收起，右键更多操作", language: settings.resolvedLanguage)
         if let candidate,

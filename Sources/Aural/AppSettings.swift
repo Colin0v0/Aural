@@ -56,6 +56,7 @@ final class AppSettings: ObservableObject {
         static let simultaneousOutput = "local.aural.settings.showSimultaneousOutput"
         static let appAudioEffects = "local.aural.settings.appAudioEffectsEnabled"
         static let menuBarBatterySource = "local.aural.settings.menuBarBatterySource"
+        static let menuBarDeviceIcon = "local.aural.settings.menuBarDeviceIcon"
         static let legacyCurrentDeviceBattery = "local.aural.settings.showCurrentDeviceBattery"
     }
 
@@ -82,6 +83,9 @@ final class AppSettings: ObservableObject {
     @Published var menuBarBatterySource: MenuBarBatterySource {
         didSet { defaults.set(menuBarBatterySource.storageValue, forKey: Key.menuBarBatterySource) }
     }
+    @Published var showMenuBarDeviceIcon: Bool {
+        didSet { defaults.set(showMenuBarDeviceIcon, forKey: Key.menuBarDeviceIcon) }
+    }
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -91,6 +95,7 @@ final class AppSettings: ObservableObject {
         showHeadphoneControls = defaults.object(forKey: Key.headphones) as? Bool ?? false
         showSimultaneousOutput = defaults.object(forKey: Key.simultaneousOutput) as? Bool ?? false
         appAudioEffectsEnabled = defaults.object(forKey: Key.appAudioEffects) as? Bool ?? false
+        showMenuBarDeviceIcon = defaults.object(forKey: Key.menuBarDeviceIcon) as? Bool ?? false
         if let stored = defaults.string(forKey: Key.menuBarBatterySource),
            let source = MenuBarBatterySource(storageValue: stored) {
             menuBarBatterySource = source
@@ -197,6 +202,9 @@ enum L10n {
         "显示多设备输出": "Show Multi-Device Output",
         "关闭后，多设备输出功能从输出面板隐藏。":
             "Show multi-device output options.",
+        "菜单栏设备图标": "Menu Bar Device Icon",
+        "开启后，图标会显示当前使用的电脑、耳机或显示器。":
+            "Shows the current computer, headphones, or display.",
         "菜单栏电量": "Menu Bar Battery",
         "固定设备断开后隐藏。": "Pinned devices hide when offline.",
         "不显示": "Don't Show",
