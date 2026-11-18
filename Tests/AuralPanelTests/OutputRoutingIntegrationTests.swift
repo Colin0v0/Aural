@@ -52,7 +52,7 @@ struct OutputRoutingIntegrationTests {
         let audio = SessionFixture()
         let model = AppModel(outputHardware: hardware.hardware, startsMonitoring: false,
                              applicationAudio: audio.environment)
-        let initialAudio = model.audio
+        #expect(model.audio != nil)
 
         // 模拟 macOS 已把媒体默认输出切到耳机，但输出流尚未出现在本次 HAL 枚举中的瞬间。
         hardware.selected = 2
@@ -60,7 +60,7 @@ struct OutputRoutingIntegrationTests {
         hardware.pendingSnapshot = true
         model.refresh()
 
-        #expect(model.audio == initialAudio)
+        #expect(model.audio == nil)
         #expect(model.audioError == nil)
         #expect(model.outputRouting.phase == .stable)
         #expect(model.outputRouting.error == nil)
@@ -87,10 +87,9 @@ struct OutputRoutingIntegrationTests {
         #expect(model.audioError == nil)
 
         // 被动断连超过快速观察窗口仍保持静默；恢复后必须使用新的设备事实。
-        let initialAudio = model.audio
         audio.now = audio.now.addingTimeInterval(30)
         model.refresh()
-        #expect(model.audio == initialAudio)
+        #expect(model.audio == nil)
         #expect(model.audioError == nil)
         #expect(model.outputRouting.phase == .stable)
         #expect(model.outputRouting.error == nil)
@@ -101,6 +100,27 @@ struct OutputRoutingIntegrationTests {
         #expect(model.audio?.selectedID == 2)
         #expect(model.audioError == nil)
         #expect(model.outputRouting.error == nil)
+        #expect(model.shutdown())
+    }
+
+    @Test func uncertainSnapshotStopsManagedAudioAndRestoresAfterRecovery() {
+        let hardware = RoutingTestHardware()
+        let audio = SessionFixture()
+        let model = AppModel(outputHardware: hardware.hardware, startsMonitoring: false,
+                             applicationAudio: audio.environment)
+        model.setApplicationGain(0.5, for: audio.row.id)
+        let previous = audio.sessions.last
+        #expect(previous?.isActive == true)
+        hardware.pendingSnapshot = true
+        model.refresh()
+        #expect(model.audio == nil)
+        #expect(model.audioError == nil)
+        #expect(previous?.isActive == false)
+        #expect(model.sessions.isEmpty)
+        hardware.pendingSnapshot = false
+        model.refresh()
+        #expect(model.audio != nil)
+        #expect(model.sessions[audio.row.id]?.isActive == true)
         #expect(model.shutdown())
     }
 

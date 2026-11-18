@@ -339,7 +339,8 @@ final class AppModel: ObservableObject {
             let previous = outputRouting.confirmed
             routing.observe(fresh, at: routingNow)
             if routing.hasPendingObservation {
-                // 尚未确认路由事实，不用旧确认结果重绑应用会话。
+                // 尚未确认路由事实，撤销旧界面和播放会话的使用资格。
+                suspendUncertainAudioObservation()
                 updateRouteConfirmationActivity()
                 return
             }
@@ -376,6 +377,7 @@ final class AppModel: ObservableObject {
             // 被动上下线没有用户操作失败：静默等待真实设备枚举恢复。
             // 三秒内快速观察，之后仅使用常规轮询，避免设备离线时一直高频刷新。
             if error is AudioSnapshotPending, !outputRouting.phase.isBusy {
+                suspendUncertainAudioObservation()
                 if pendingAudioSnapshotDeadline == nil {
                     pendingAudioSnapshotDeadline = routingNow.addingTimeInterval(3)
                 }
@@ -392,6 +394,15 @@ final class AppModel: ObservableObject {
             headphones.outputUnavailable()
             pauseManagedApplications("系统音频状态读取失败：\(error.localizedDescription)")
         }
+    }
+
+    /// 系统快照不可信时不展示旧设备，也不让已接管会话继续持有旧播放路由。
+    /// 资源释放失败沿用现有清理错误，不能静默掩盖。
+    private func suspendUncertainAudioObservation() {
+        if audio != nil { audio = nil }
+        headphoneControl = HeadphoneControlSelection()
+        if observesHeadphones { headphones.outputUnavailable() }
+        for key in Array(sessions.keys) where cleanupErrors[key] == nil { stop(key) }
     }
 
     /// 只在等待 HAL 时短周期读取同一目标；不重复发出写请求，也不阻塞 UI 主线程。
