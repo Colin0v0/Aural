@@ -27,6 +27,7 @@ struct SystemAudioTests {
         do {
             _ = try SystemAudio.readOutputs(
                 deviceIDs: [11, 22],
+                requiredDeviceID: 22,
                 readStreams: { _ in [1] },
                 readUID: { "speaker-\($0)" },
                 readName: { id in
@@ -48,6 +49,29 @@ struct SystemAudioTests {
         }
     }
 
+    @Test func staleNonDefaultObjectDoesNotBreakTheCurrentOutputSnapshot() throws {
+        var nameReads = 0
+        let outputs = try SystemAudio.readOutputs(
+            deviceIDs: [11, 22],
+            requiredDeviceID: 11,
+            readStreams: { _ in [1] },
+            readUID: { "speaker-\($0)" },
+            readName: { id in
+                if id == 22 {
+                    nameReads += 1
+                    throw AudioFailure("读取音频名称失败", status: HAL.badObjectStatus)
+                }
+                return "扬声器 \(id)"
+            },
+            readTransport: { _ in kAudioDeviceTransportTypeBuiltIn },
+            currentDeviceIDs: { [11, 22] }
+        )
+
+        // HAL 长期保留已销毁的非默认对象时，只忽略该残留项，当前默认输出仍完整确认。
+        #expect(nameReads == 2)
+        #expect(outputs.map(\.id) == [11])
+    }
+
     @Test func pendingSnapshotReenumeratesAndRecovers() throws {
         var enumerations = 0
         let outputs = try SystemAudio.readSettledSnapshot {
@@ -55,6 +79,7 @@ struct SystemAudioTests {
             let ids: [AudioDeviceID] = enumerations == 1 ? [11, 22] : [11]
             return try SystemAudio.readOutputs(
                 deviceIDs: ids,
+                requiredDeviceID: 22,
                 readStreams: { _ in [1] },
                 readUID: { "speaker-\($0)" },
                 readName: { id in
@@ -154,6 +179,7 @@ struct SystemAudioTests {
         var currentReads = 0
         let outputs = try SystemAudio.readOutputs(
             deviceIDs: [11, 22],
+            requiredDeviceID: 11,
             readStreams: { _ in [1] },
             readUID: { id in
                 // 22 号设备在枚举后断开；11 号设备仍可正常读取。
@@ -178,6 +204,7 @@ struct SystemAudioTests {
         do {
             _ = try SystemAudio.readOutputs(
                 deviceIDs: [11],
+                requiredDeviceID: 11,
                 readStreams: { _ in [1] },
                 readUID: { _ in "speaker-11" },
                 readName: { _ in throw AudioFailure("设备属性读取失败") },
@@ -196,6 +223,7 @@ struct SystemAudioTests {
         var currentReads = 0
         let outputs = try SystemAudio.readOutputs(
             deviceIDs: [11, 22],
+            requiredDeviceID: 11,
             readStreams: { _ in [1] },
             readUID: { "speaker-\($0)" },
             readName: { id in
@@ -222,6 +250,7 @@ struct SystemAudioTests {
         var nameReads = 0
         let outputs = try SystemAudio.readOutputs(
             deviceIDs: [11],
+            requiredDeviceID: 11,
             readStreams: { _ in [1] },
             readUID: { _ in "speaker-11" },
             readName: { _ in
@@ -242,6 +271,7 @@ struct SystemAudioTests {
         var identityReads: [AudioDeviceID] = []
         let outputs = try SystemAudio.readOutputs(
             deviceIDs: [11, 22],
+            requiredDeviceID: 22,
             readStreams: { id in id == 11 ? [] : [1] },
             readUID: { id in
                 identityReads.append(id)
