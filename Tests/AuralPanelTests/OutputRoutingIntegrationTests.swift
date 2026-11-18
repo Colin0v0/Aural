@@ -103,24 +103,30 @@ struct OutputRoutingIntegrationTests {
         #expect(model.shutdown())
     }
 
-    @Test func uncertainSnapshotStopsManagedAudioAndRestoresAfterRecovery() {
+    @Test func uncertainSnapshotKeepsTheMutedTapAndRestoresReplayAfterRecovery() {
         let hardware = RoutingTestHardware()
         let audio = SessionFixture()
         let model = AppModel(outputHardware: hardware.hardware, startsMonitoring: false,
                              applicationAudio: audio.environment)
         model.setApplicationGain(0.5, for: audio.row.id)
-        let previous = audio.sessions.last
-        #expect(previous?.isActive == true)
+        let session = audio.sessions.last
+        #expect(session?.isActive == true)
         hardware.pendingSnapshot = true
         model.refresh()
         #expect(model.audio == nil)
         #expect(model.audioError == nil)
-        #expect(previous?.isActive == false)
-        #expect(model.sessions.isEmpty)
+        #expect(session?.isActive == false)
+        #expect(session?.isSuspendedForOutputChange == true)
+        #expect(model.sessions[audio.row.id] === session)
+        #expect(audio.sessions.count == 1)
+        #expect(session?.stopCount == 0)
         hardware.pendingSnapshot = false
         model.refresh()
         #expect(model.audio != nil)
-        #expect(model.sessions[audio.row.id]?.isActive == true)
+        #expect(model.sessions[audio.row.id] === session)
+        #expect(session?.isActive == true)
+        #expect(audio.sessions.count == 1)
+        #expect(session?.stopCount == 0)
         #expect(model.shutdown())
     }
 
@@ -202,6 +208,62 @@ struct OutputRoutingIntegrationTests {
         #expect(model.mixStates[browser.id]?.gain == 0.8)
         #expect(model.levelSource(for: audio.row.id) === source)
         #expect(model.levelSource(for: browser.id) === browserSource)
+        #expect(model.shutdown())
+    }
+
+    @Test func mutedApplicationKeepsTheSameTapWhileSwitchingOutput() throws {
+        let hardware = RoutingTestHardware()
+        let audio = SessionFixture()
+        let model = AppModel(outputHardware: hardware.hardware, startsMonitoring: false,
+                             applicationAudio: audio.environment)
+        let applicationID = audio.row.id
+        model.setApplicationGain(0.58, for: applicationID)
+        model.toggleApplicationMute(applicationID)
+        let session = try #require(audio.sessions.last)
+        #expect(session.output.uid == "speaker")
+        #expect(session.muted)
+
+        model.selectOutput(2)
+
+        #expect(model.outputRouting.phase == .confirmed)
+        #expect(audio.sessions.count == 1)
+        #expect(audio.sessions.last === session)
+        #expect(session.suspendCount == 1)
+        #expect(session.switchCount == 1)
+        #expect(session.stopCount == 0)
+        #expect(session.output.uid == "headphone")
+        #expect(session.playbackUIDs == ["headphone"])
+        #expect(session.gain == 0.58)
+        #expect(session.muted)
+        #expect(session.isActive)
+        #expect(model.shutdown())
+    }
+
+    @Test func mutedApplicationKeepsTheSameTapWhileChangingMultiOutputMembers() throws {
+        let hardware = RoutingTestHardware()
+        let audio = SessionFixture()
+        let model = AppModel(outputHardware: hardware.hardware, startsMonitoring: false,
+                             applicationAudio: audio.environment)
+        let applicationID = audio.row.id
+        model.setApplicationGain(0.63, for: applicationID)
+        model.toggleApplicationMute(applicationID)
+        #expect(model.startSimultaneousOutput(["speaker", "headphone"]))
+        let session = try #require(audio.sessions.last)
+        #expect(session.output.isAuralMultiOutput)
+
+        // 组合成员变化同样只重建重放端；静音 Tap 不能在组合拆建期间被销毁。
+        #expect(model.updateSimultaneousOutput(["speaker", "usb"]))
+
+        #expect(model.outputRouting.phase == .confirmed)
+        #expect(audio.sessions.count == 1)
+        #expect(audio.sessions.last === session)
+        #expect(session.stopCount == 0)
+        #expect(session.suspendCount == 2)
+        #expect(session.switchCount == 2)
+        #expect(session.isActive)
+        #expect(Set(session.playbackUIDs) == Set(["speaker", "usb"]))
+        #expect(session.gain == 0.63)
+        #expect(session.muted)
         #expect(model.shutdown())
     }
 
@@ -343,7 +405,10 @@ struct OutputRoutingIntegrationTests {
         #expect(model.multiOutputError == nil)
         #expect(model.mixStates[audio.row.id]?.failure == nil)
         #expect(model.mixStates[audio.row.id]?.gain == 0)
-        #expect(model.sessions.isEmpty)
+        let suspended = model.sessions[audio.row.id]
+        #expect(suspended?.isSuspendedForOutputChange == true)
+        #expect(suspended?.isActive == false)
+        #expect(suspended?.isReleased == false)
         let destroyCount = hardware.destroyed.count
         model.refresh()
         #expect(hardware.destroyed.count == destroyCount)
@@ -369,7 +434,9 @@ struct OutputRoutingIntegrationTests {
         hardware.deferSelection = true
         #expect(!model.startSimultaneousOutput(["speaker", "headphone"]))
         #expect(model.outputRouting.phase == .awaitingHAL)
-        #expect(model.sessions.isEmpty)
+        let suspended = model.sessions[audio.row.id]
+        #expect(suspended?.isSuspendedForOutputChange == true)
+        #expect(suspended?.isActive == false)
         #expect(model.mixStates[audio.row.id]?.failure == nil)
         hardware.deferSelection = false; hardware.commitSelection()
         model.refresh()
@@ -386,17 +453,23 @@ struct OutputRoutingIntegrationTests {
         model.setApplicationGain(0, for: audio.row.id)
         audio.routePending = true
         #expect(model.startSimultaneousOutput(["speaker", "headphone"]))
-        #expect(model.sessions.isEmpty)
+        let session = audio.sessions.last
+        #expect(model.sessions.count == 1)
+        #expect(session?.isSuspendedForOutputChange == true)
+        #expect(session?.isActive == false)
         #expect(model.mixStates[audio.row.id]?.failure == nil)
         audio.now = audio.now.addingTimeInterval(1)
         model.refresh()
         #expect(model.mixStates[audio.row.id]?.failure == nil)
+        #expect(model.sessions[audio.row.id] === session)
+        #expect(session?.isSuspendedForOutputChange == true)
         audio.routePending = false
         model.refresh()
-        #expect(audio.sessions.last?.isActive == true)
-        #expect(audio.sessions.last?.gain == 0)
+        #expect(model.sessions[audio.row.id] === session)
+        #expect(session?.isActive == true)
+        #expect(session?.gain == 0)
         model.setApplicationGain(0.6, for: audio.row.id)
-        #expect(audio.sessions.last?.gain == 0.6)
+        #expect(session?.gain == 0.6)
         #expect(model.shutdown())
     }
 
@@ -411,16 +484,24 @@ struct OutputRoutingIntegrationTests {
         #expect(model.mixStates[audio.row.id]?.failure != nil)
         audio.routePending = false
         model.refresh()
+        // 路由传播期间还没有成功创建 tap；这里没有可保留的静音资源。
         #expect(model.sessions.isEmpty)
         model.applyApplication(audio.row.id)
         #expect(model.mixStates[audio.row.id]?.failure == nil)
+        let session = audio.sessions.last
+        #expect(model.sessions[audio.row.id] === session)
+        #expect(session?.isActive == true)
         audio.startError = AudioFailure("录制权限被拒绝")
         #expect(model.startSimultaneousOutput(["speaker", "headphone"]))
         #expect(model.mixStates[audio.row.id]?.failure == "录制权限被拒绝")
+        #expect(model.sessions[audio.row.id] === session)
+        #expect(session?.isSuspendedForOutputChange == true)
+        #expect(session?.stopCount == 0)
         audio.startError = nil
         #expect(model.updateSimultaneousOutput(["speaker"]))
         #expect(model.mixStates[audio.row.id]?.failure == "录制权限被拒绝")
-        #expect(model.sessions.isEmpty)
+        #expect(model.sessions[audio.row.id] === session)
+        #expect(session?.isSuspendedForOutputChange == true)
         #expect(model.shutdown())
     }
 
@@ -538,6 +619,7 @@ struct OutputRoutingIntegrationTests {
         let audio = SessionFixture()
         let model = AppModel(outputHardware: hardware.hardware, startsMonitoring: false, applicationAudio: audio.environment)
         model.setApplicationGain(0.3, for: audio.row.id)
+        let session = audio.sessions.last
         hardware.deferSelection = true
         #expect(!model.startSimultaneousOutput(["speaker", "headphone"]))
         model.applyApplication(audio.row.id)
@@ -550,10 +632,14 @@ struct OutputRoutingIntegrationTests {
         #expect(model.outputRouting.phase == .confirmed)
         // 旧的重试不能授权清除它之后才发生的新错误，必须再明确重新应用。
         #expect(model.mixStates[audio.row.id]?.failure?.contains("进程枚举失败") == true)
-        #expect(model.sessions.isEmpty)
+        #expect(model.sessions[audio.row.id] === session)
+        #expect(session?.isSuspendedForOutputChange == true)
+        #expect(session?.stopCount == 0)
         model.applyApplication(audio.row.id)
         #expect(model.mixStates[audio.row.id]?.failure == nil)
-        #expect(audio.sessions.last?.isActive == true)
+        #expect(model.sessions[audio.row.id] === session)
+        #expect(session?.isActive == true)
+        #expect(session?.stopCount == 0)
         #expect(model.shutdown())
     }
 
@@ -564,24 +650,64 @@ struct OutputRoutingIntegrationTests {
         model.setApplicationGain(0, for: audio.row.id)
         audio.routePending = true
         audio.healthError = ApplicationRoutePending()
+        let session = audio.sessions.last
         model.refresh()
-        #expect(model.sessions.isEmpty)
+        // 传播等待不是音频故障；保留现有 tap，避免为了重试而先暴露原声。
+        #expect(model.sessions[audio.row.id] === session)
+        #expect(session?.isActive == true)
         #expect(model.mixStates[audio.row.id]?.failure == nil)
         audio.routePending = false; audio.healthError = nil
         model.refresh()
-        #expect(audio.sessions.last?.gain == 0)
-        #expect(audio.sessions.last?.isActive == true)
+        #expect(model.sessions[audio.row.id] === session)
+        #expect(session?.gain == 0)
+        #expect(session?.isActive == true)
 
         audio.healthError = AudioFailure("实时缓冲布局不匹配")
         model.refresh()
         #expect(model.mixStates[audio.row.id]?.failure == "实时缓冲布局不匹配")
-        #expect(model.sessions.isEmpty)
+        #expect(model.sessions[audio.row.id] === session)
+        #expect(session?.isSuspendedForOutputChange == true)
+        #expect(session?.stopCount == 0)
         audio.healthError = nil
         #expect(model.startSimultaneousOutput(["speaker", "headphone"]))
         #expect(model.mixStates[audio.row.id]?.failure == "实时缓冲布局不匹配")
         model.applyApplication(audio.row.id)
-        #expect(audio.sessions.last?.gain == 0)
-        #expect(audio.sessions.last?.isActive == true)
+        #expect(model.sessions[audio.row.id] === session)
+        #expect(session?.gain == 0)
+        #expect(session?.isActive == true)
+        #expect(session?.stopCount == 0)
+        #expect(model.shutdown())
+    }
+
+    @Test func effectOnlyMixingTapSurvivesHealthFailureWithoutVolumeManagement() throws {
+        let hardware = RoutingTestHardware()
+        let audio = SessionFixture()
+        let suite = "Aural.EffectOnlyMuteSafety.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defaults.removePersistentDomain(forName: suite)
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let model = AppModel(outputHardware: hardware.hardware, startsMonitoring: false,
+                             applicationAudio: audio.environment,
+                             appAudioEffectStore: AppAudioEffectStore(defaults: defaults),
+                             appAudioEffectsEnabled: true)
+        var effect = AppAudioEffectSettings(enabled: true)
+        effect.apply(.voice)
+        model.setApplicationAudioEffect(effect, for: audio.row.id)
+        let session = try #require(audio.sessions.last)
+        #expect(model.mixStates[audio.row.id]?.managed == false)
+        #expect(session.mode == .mixing)
+
+        audio.healthError = AudioFailure("实时缓冲布局不匹配")
+        model.refresh()
+
+        #expect(model.sessions[audio.row.id] === session)
+        #expect(session.isSuspendedForOutputChange)
+        #expect(session.stopCount == 0)
+        audio.healthError = nil
+        model.applyApplication(audio.row.id)
+        #expect(model.sessions[audio.row.id] === session)
+        #expect(session.isActive)
+        #expect(session.stopCount == 0)
         #expect(model.shutdown())
     }
 
@@ -591,17 +717,48 @@ struct OutputRoutingIntegrationTests {
         let model = AppModel(outputHardware: hardware.hardware, startsMonitoring: false, applicationAudio: audio.environment)
         model.setApplicationGain(0.4, for: audio.row.id)
         #expect(model.startSimultaneousOutput(["speaker", "headphone"]))
+        let session = audio.sessions.last
+        #expect(session?.isActive == true)
         hardware.failCreation = true
         #expect(!model.updateSimultaneousOutput(["headphone", "usb"]))
         #expect(model.outputRouting.phase == .failed)
         #expect(model.outputRouting.actualOutput?.uid == "headphone")
         #expect(model.outputRouting.selectedMemberUIDs.isEmpty)
-        #expect(audio.sessions.allSatisfy { $0.isReleased })
+        #expect(model.sessions[audio.row.id] === session)
+        #expect(session?.isSuspendedForOutputChange == true)
+        #expect(session?.stopCount == 0)
         #expect(model.mixStates[audio.row.id]?.gain == 0.4)
         hardware.failCreation = false
         #expect(model.startSimultaneousOutput(["headphone"]))
-        #expect(audio.sessions.last?.playbackUIDs == ["headphone"])
+        #expect(model.sessions[audio.row.id] === session)
+        #expect(session?.playbackUIDs == ["headphone"])
         #expect(model.mixStates[audio.row.id]?.failure == nil)
+        #expect(model.shutdown())
+    }
+
+    @Test func failedStartWithAnActiveMuteTapIsReusedByExplicitRetry() throws {
+        let hardware = RoutingTestHardware()
+        let audio = SessionFixture()
+        audio.startError = AudioFailure("注入：启动失败")
+        audio.suspendsOnStartFailure = true
+        let model = AppModel(outputHardware: hardware.hardware, startsMonitoring: false,
+                             applicationAudio: audio.environment)
+
+        model.setApplicationGain(0.25, for: audio.row.id)
+        let session = try #require(model.sessions[audio.row.id] as? MemoryAudioSession)
+        #expect(model.mixStates[audio.row.id]?.failure == "注入：启动失败")
+        #expect(model.cleanupErrors.isEmpty)
+        #expect(session.isSuspendedForOutputChange)
+        #expect(session.stopCount == 0)
+
+        audio.startError = nil
+        model.applyApplication(audio.row.id)
+
+        #expect(model.mixStates[audio.row.id]?.failure == nil)
+        #expect(model.sessions[audio.row.id] === session)
+        #expect(session.isActive)
+        #expect(session.switchCount == 1)
+        #expect(session.stopCount == 0)
         #expect(model.shutdown())
     }
 
@@ -610,13 +767,13 @@ struct OutputRoutingIntegrationTests {
         let audio = SessionFixture()
         let model = AppModel(outputHardware: hardware.hardware, startsMonitoring: false, applicationAudio: audio.environment)
         model.setApplicationGain(0.2, for: audio.row.id)
-        audio.sessions.last?.failStop = true
+        audio.sessions.last?.failSuspend = true
         let writes = hardware.selections.count
         #expect(!model.startSimultaneousOutput(["speaker", "headphone"]))
         #expect(hardware.selections.count == writes)
         #expect(!model.cleanupErrors.isEmpty)
         #expect(model.mixStates[audio.row.id]?.failure != nil)
-        audio.sessions.last?.failStop = false
+        audio.sessions.last?.failSuspend = false
         model.applyApplication(audio.row.id)
         #expect(model.cleanupErrors.isEmpty)
         #expect(model.shutdown())
@@ -991,6 +1148,8 @@ final class SessionFixture {
     var additionalRows: [ApplicationAudioRow] = []
     var routePending = false
     var startError: Error?
+    /// 模拟真实会话已经创建 tap 后才启动失败；此时必须保留静音资源。
+    var suspendsOnStartFailure = false
     var healthError: Error?
     var readError: Error?
     var now = Date(timeIntervalSince1970: 1_000)
@@ -1009,7 +1168,9 @@ final class SessionFixture {
             makeSession: { group, output, route, mode in
                 let session = MemoryAudioSession(group: group, output: output, route: route, mode: mode)
                 session.startFailure = { self.routePending ? ApplicationRoutePending() : self.startError }
+                session.switchFailure = { self.routePending ? ApplicationRoutePending() : self.startError }
                 session.healthFailure = { self.healthError }
+                session.suspendsOnStartFailure = self.suspendsOnStartFailure
                 self.sessions.append(session)
                 return session
             }, now: { self.now }, captureAccess: { self.captureAccess })
@@ -1019,16 +1180,23 @@ final class SessionFixture {
 @MainActor
 final class MemoryAudioSession: ApplicationAudioSession {
     let group: AudioProcessGroup
-    let output: AudioOutput
+    var output: AudioOutput
     let mode: ApplicationAudioMode
-    let playbackRoute: ApplicationPlaybackRoute
-    let playbackUIDs: [String]
+    var playbackRoute: ApplicationPlaybackRoute
+    var playbackUIDs: [String]
     var isActive = false
     var isReleased = true
+    var isSuspendedForOutputChange = false
     var gain: Float = 1
     var muted = false
     var effect: AppAudioEffectSettings?
+    var suspendCount = 0
+    var switchCount = 0
+    var stopCount = 0
     var failStop = false
+    var failSuspend = false
+    var suspendsOnStartFailure = false
+    var switchFailure: () -> Error? = { nil }
     var startFailure: () -> Error? = { nil }
     var healthFailure: () -> Error? = { nil }
     init(group: AudioProcessGroup, output: AudioOutput, route: ApplicationPlaybackRoute?, mode: ApplicationAudioMode) {
@@ -1039,16 +1207,38 @@ final class MemoryAudioSession: ApplicationAudioSession {
     func setGain(_ value: Float) throws { gain = value }
     func setMuted(_ value: Bool) { muted = value }
     func setEffect(_ settings: AppAudioEffectSettings?) { effect = settings }
+    func suspendForOutputChange() throws {
+        if failSuspend { throw AudioFailure("注入：会话暂停失败") }
+        suspendCount += 1
+        isSuspendedForOutputChange = true
+        isActive = false
+    }
+    func switchOutput(to output: AudioOutput, playbackRoute: ApplicationPlaybackRoute) throws {
+        if let error = switchFailure() { throw error }
+        switchCount += 1
+        self.output = output
+        self.playbackRoute = playbackRoute
+        playbackUIDs = playbackRoute.playbackDeviceUIDs
+        isSuspendedForOutputChange = false
+        isActive = true
+    }
     func start() throws {
-        if let error = startFailure() { throw error }
+        if let error = startFailure() {
+            if suspendsOnStartFailure {
+                isSuspendedForOutputChange = true
+                isReleased = false
+            }
+            throw error
+        }
         isActive = true; isReleased = false
     }
     func checkHealth(expectingAudio: Bool) throws {
         if let error = healthFailure() { throw error }
     }
     func stop() throws {
+        stopCount += 1
         if failStop { throw AudioFailure("注入：旧会话释放失败") }
-        isActive = false; isReleased = true
+        isActive = false; isSuspendedForOutputChange = false; isReleased = true
     }
     // 模拟会话不生成虚构电平，验收只检查目标和生命周期，不将它当真实发声证据。
     func consumePeak() -> Float? { nil }
