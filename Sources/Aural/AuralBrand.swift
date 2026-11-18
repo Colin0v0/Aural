@@ -53,4 +53,16 @@ enum AuralStatusIcon {
         image.isTemplate = true
         return image
     }
+
+    /// 设备图标使用系统符号并保持模板着色，自动适配菜单栏明暗外观。
+    static func device(systemName: String, size: CGFloat = 15) -> NSImage {
+        let configuration = NSImage.SymbolConfiguration(pointSize: size, weight: .medium)
+        guard let image = NSImage(systemSymbolName: systemName,
+                                  accessibilityDescription: nil)?
+            .withSymbolConfiguration(configuration) else {
+            fatalError("缺少菜单栏设备图标：\(systemName)")
+        }
+        image.isTemplate = true
+        return image
+    }
 }

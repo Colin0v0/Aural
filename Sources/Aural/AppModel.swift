@@ -500,6 +500,17 @@ final class AppModel: ObservableObject {
         return .direct(deviceUID: output.uid)
     }
 
+    /// 菜单栏设备图标始终跟随当前系统输出，不能受菜单栏电量固定设备影响。
+    func menuBarDeviceSymbol() -> String? {
+        guard let output = selectedOutput else { return nil }
+        return menuBarDeviceSymbol(for: output)
+    }
+
+    private func menuBarDeviceSymbol(for output: AudioOutput) -> String {
+        if output.isAuralMultiOutput || output.isAggregate { return "rectangle.on.rectangle" }
+        return output.symbol
+    }
+
     /// 只有已经回读电量的可控耳机能进入菜单栏候选；未知值不生成占位候选。
     var menuBarBatteryCandidates: [MenuBarBatteryCandidate] {
         headphones.entries.compactMap { entry in

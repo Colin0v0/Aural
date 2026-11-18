@@ -122,6 +122,12 @@ struct SettingsView: View {
                 isOn: applicationEffectsBinding
             )
             PanelDivider()
+            SettingsToggleRow(
+                title: settings.localized("菜单栏设备图标"),
+                detail: settings.localized("开启后，图标会显示当前使用的电脑、耳机或显示器。"),
+                isOn: $settings.showMenuBarDeviceIcon
+            )
+            PanelDivider()
             MenuBarBatterySettingsRow(settings: settings, group: model.headphones)
         }
     }
@@ -213,7 +219,7 @@ enum SettingsMetrics {
     static let horizontalInset: CGFloat = 18
     static let width: CGFloat = 500
     // 新增应用音效总开关后按真实内容增高，避免固定窗口裁掉最后一行。
-    static let height: CGFloat = 520
+    static let height: CGFloat = 572
     static let controlWidth: CGFloat = 238
     static let booleanControlWidth: CGFloat = 116
     static let rowHeight: CGFloat = 40

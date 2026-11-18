@@ -3,6 +3,19 @@ import CoreAudio
 @testable import AuralCore
 
 struct SystemAudioTests {
+    @Test func outputSymbolsDistinguishComputerHeadphonesAndDisplay() {
+        let computer = AudioOutput(id: 1, uid: "computer", name: "MacBook Air 扬声器",
+                                   transport: kAudioDeviceTransportTypeBuiltIn)
+        let headphones = AudioOutput(id: 2, uid: "headphones", name: "蓝牙耳机",
+                                      transport: kAudioDeviceTransportTypeBluetooth)
+        let display = AudioOutput(id: 3, uid: "display", name: "显示器",
+                                  transport: kAudioDeviceTransportTypeHDMI)
+
+        #expect(computer.symbol == "laptopcomputer")
+        #expect(headphones.symbol == "headphones")
+        #expect(display.symbol == "display")
+    }
+
     @Test func badObjectStatusMatchesCoreAudioDisconnectError() {
         // 使用实际错误码，避免测试和实现同时误把未知属性 `who?` 当成失效对象。
         #expect(HAL.badObjectStatus == 560_947_818)
@@ -278,5 +291,5 @@ struct SystemAudioTests {
         #expect(!SystemAudio.activeAggregateRouteContains("other", composition: composition as CFDictionary, activeUIDs: ["other"]))
     }
 
-    @Test func versionIsDefined() { #expect(AuralVersion.current == "0.3.4") }
+    @Test func versionIsDefined() { #expect(AuralVersion.current == "0.3.5") }
 }
