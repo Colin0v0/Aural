@@ -45,93 +45,112 @@ final class AuralUpdateChecker: ObservableObject {
     private let lastCheckKey = "local.aural.updates.lastCheck"
     private let skippedVersionKey = "local.aural.updates.skippedVersion"
     private var checkTask: Task<Void, Never>?
+    /// 手动请求可升级正在进行的后台检查，不重复发出网络请求。
+    private var currentCheckIsManual = false
+    private let fetchUpdate: @MainActor () async throws -> AuralAvailableUpdate?
     private var periodicTimer: Timer?
     private var downloadSession: URLSession?
     private var downloadGeneration: UInt64 = 0
     private var pendingRestart = false
 
     init(defaults: UserDefaults = .standard,
-         currentVersion: String = AuralVersion.current) {
+         currentVersion: String = AuralVersion.current,
+         fetchUpdate: @escaping @MainActor (String) async throws -> AuralAvailableUpdate? = AuralUpdateChecker.fetchAvailableUpdate) {
         self.defaults = defaults
         self.currentVersion = currentVersion
+        self.fetchUpdate = { try await fetchUpdate(currentVersion) }
     }
 
-    /// 启动立即检查一次，随后每六小时检查一次；长期运行的应用不能只依赖首次启动。
+    /// 每分钟只检查本地时间，真正的网络请求仍按上次成功检查限频。
     func startAutomaticChecking() {
         checkIfNeeded()
         guard periodicTimer == nil else { return }
-        let timer = Timer(timeInterval: checkInterval, repeats: true) { [weak self] _ in
-            Task { @MainActor [weak self] in
-                self?.check(force: false)
-            }
+        let timer = Timer(timeInterval: 60, repeats: true) { [weak self] _ in
+            Task { @MainActor [weak self] in self?.checkIfNeeded() }
         }
         RunLoop.main.add(timer, forMode: .common)
         periodicTimer = timer
     }
 
-    /// 启动时最多每六小时请求一次，避免后台常驻时反复访问 GitHub。
+    /// 系统时间回拨后清除未来的时间戳，允许重新检查而不是等待时钟追上。
+    static func isCheckDue(lastCheck: TimeInterval, now: TimeInterval, interval: TimeInterval) -> Bool {
+        lastCheck <= 0 || lastCheck > now || now - lastCheck >= interval
+    }
+
     func checkIfNeeded() {
-        let lastCheck = defaults.double(forKey: lastCheckKey)
-        guard Date().timeIntervalSince1970 - lastCheck >= checkInterval else { return }
         check(force: false)
     }
 
     func check(force: Bool) {
-        guard !isChecking else { return }
+        if isChecking {
+            if force {
+                // 同一请求完成后按手动检查展示结果及错误。
+                currentCheckIsManual = true
+                didCheckWithoutUpdate = false
+            }
+            return
+        }
         if !force {
             let lastCheck = defaults.double(forKey: lastCheckKey)
-            guard Date().timeIntervalSince1970 - lastCheck >= checkInterval else { return }
+            let now = Date().timeIntervalSince1970
+            guard Self.isCheckDue(lastCheck: lastCheck, now: now, interval: checkInterval) else { return }
+            if lastCheck > now { defaults.removeObject(forKey: lastCheckKey) }
         }
-        // 下载或安装已经就绪时不能被一次后台检查覆盖本地暂存状态。
+        // 下载失败必须保留原始错误，直到用户明确重试；后台检查不能重置它。
         switch phase {
         case .downloading, .preparing, .ready:
+            return
+        case .failed where !force:
             return
         case .idle, .available, .failed:
             break
         }
         isChecking = true
-        lastError = nil
+        currentCheckIsManual = force
+        if case .failed = phase {} else { lastError = nil }
         if force { didCheckWithoutUpdate = false }
         checkTask = Task { [weak self] in
             guard let self else { return }
-            defer { isChecking = false }
+            defer { isChecking = false; currentCheckIsManual = false }
             do {
-                let update = try await fetchAvailableUpdate()
+                let update = try await fetchUpdate()
+                let manual = currentCheckIsManual
                 defaults.set(Date().timeIntervalSince1970, forKey: lastCheckKey)
                 guard let update else {
                     availableUpdate = nil
                     phase = .idle
-                    didCheckWithoutUpdate = force
+                    lastError = nil
+                    didCheckWithoutUpdate = manual
                     return
                 }
                 let skippedVersion = defaults.string(forKey: skippedVersionKey)
                 guard Self.shouldPresent(update: update,
                                          skippedVersion: skippedVersion,
-                                         manualCheck: force) else {
+                                         manualCheck: manual) else {
                     availableUpdate = nil
                     phase = .idle
-                    didCheckWithoutUpdate = force
+                    lastError = nil
+                    didCheckWithoutUpdate = manual
                     return
                 }
-                // 手动检查可以重新展示被关闭的版本；点击更新后不能继续保留“已跳过”状态。
-                if skippedVersion != nil {
-                    defaults.removeObject(forKey: skippedVersionKey)
-                }
+                if skippedVersion != nil { defaults.removeObject(forKey: skippedVersionKey) }
                 availableUpdate = update
                 phase = .available
+                lastError = nil
                 didCheckWithoutUpdate = false
             } catch {
-                // 已有更新提示不能因一次网络失败消失，只记录本次检查错误。
-                lastError = error.localizedDescription
-                if availableUpdate == nil {
-                    if case .failed = phase {
-                        // 保留下载失败原因。
-                    } else {
-                        phase = .idle
-                    }
+                // 已有下载错误优先保留；后台检查失败不打扰用户。
+                if case .failed = phase {} else {
+                    recordCheckFailure(error, manual: currentCheckIsManual)
+                    if availableUpdate == nil { phase = .idle }
                 }
             }
         }
+    }
+
+    /// 区分检查来源，不能把后台网络故障误报为用户主动操作失败。
+    func recordCheckFailure(_ error: Error, manual: Bool) {
+        if manual { lastError = error.localizedDescription }
     }
 
     /// 用户点击更新后下载 DMG，完成摘要校验和签名验证后才允许重启安装。
@@ -286,7 +305,7 @@ final class AuralUpdateChecker: ObservableObject {
         return value.lowercased()
     }
 
-    private func fetchAvailableUpdate() async throws -> AuralAvailableUpdate? {
+    private static func fetchAvailableUpdate(currentVersion: String) async throws -> AuralAvailableUpdate? {
         guard let repository = Bundle.main.object(forInfoDictionaryKey: "AuralUpdateRepository") as? String,
               !repository.isEmpty else {
             throw AuralUpdateError.missingRepository

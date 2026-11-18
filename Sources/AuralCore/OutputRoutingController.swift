@@ -214,16 +214,17 @@ public final class OutputRoutingController {
 
     /// 监听与周期刷新都只观察同一阶段；迟到的旧路由通知不能确认新的目标。
     public func observe(_ snapshot: SystemAudioSnapshot, at now: Date = Date()) {
-        latestSnapshot = snapshot
-        resources.recordUnmanagedOutputs(in: snapshot)
-        state.actualOutput = snapshot.outputs.first { $0.id == snapshot.selectedID }
-        refreshConfirmedHandles(in: snapshot)
-        // 蓝牙重连可能换掉 HAL 句柄；资源层也必须按 UID 跟随同一台设备。
-        _ = resources.refreshHandles(snapshot: snapshot)
         var observationSucceeded = true
         defer { if observationSucceeded { observationDeadline = nil } }
         do {
+            // 先完成提示音输出读取，失败时不能提前提交新快照或替换设备句柄。
             let systemSelected = try hardware.selectedSystemOutputID()
+            latestSnapshot = snapshot
+            resources.recordUnmanagedOutputs(in: snapshot)
+            state.actualOutput = snapshot.outputs.first { $0.id == snapshot.selectedID }
+            refreshConfirmedHandles(in: snapshot)
+            // 蓝牙重连可能换掉 HAL 句柄；资源层也必须按 UID 跟随同一台设备。
+            _ = resources.refreshHandles(snapshot: snapshot)
             state.actualSystemOutputID = systemSelected
             if recoverableObservationFailure {
                 // 只恢复观察失败，不重放上一次写操作，也不把旧路由当作已确认。

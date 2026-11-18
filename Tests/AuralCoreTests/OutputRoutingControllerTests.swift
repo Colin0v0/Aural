@@ -24,6 +24,21 @@ struct OutputRoutingControllerTests {
         #expect(fixture.selections.isEmpty)
     }
 
+    @Test func failedSystemReadDoesNotPublishNewDeviceHandles() {
+        let fixture = RoutingTestHardware()
+        let controller = OutputRoutingController(hardware: fixture.hardware)
+        controller.observe(fixture.snapshot, at: start)
+        let previous = controller.state.confirmed
+        let snapshot = controller.latestSnapshot
+        fixture.outputs[0] = AudioOutput(id: 91, uid: "speaker", name: "测试扬声器", transport: kAudioDeviceTransportTypeBuiltIn)
+        fixture.selected = 91
+        fixture.failSystemRead = true
+        controller.observe(fixture.snapshot, at: start.addingTimeInterval(1))
+        #expect(controller.hasPendingObservation)
+        #expect(controller.state.confirmed == previous)
+        #expect(controller.latestSnapshot == snapshot)
+    }
+
     @Test func prolongedObservationIsSilentAndRecoversFromFreshFacts() {
         let fixture = RoutingTestHardware()
         let controller = OutputRoutingController(hardware: fixture.hardware)

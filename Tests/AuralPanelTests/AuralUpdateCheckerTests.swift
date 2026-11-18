@@ -6,6 +6,66 @@ struct AuralUpdateCheckerTests {
     private let digest = "sha256:c55497f43fd177df00cd7dc8d4d0cb167b9ff65a6b73e8d40c752d48714339da"
     private let repository = "example/Aural"
 
+    @MainActor
+    @Test func backgroundCheckFailureStaysSilentButManualFailureIsVisible() {
+        let checker = AuralUpdateChecker()
+        let error = AuralUpdateError.httpFailure(503)
+        checker.recordCheckFailure(error, manual: false)
+        #expect(checker.lastError == nil)
+        #expect(!checker.didCheckWithoutUpdate)
+        checker.recordCheckFailure(error, manual: true)
+        #expect(checker.lastError == "服务器返回 HTTP 503")
+        #expect(!checker.didCheckWithoutUpdate)
+    }
+
+    @MainActor
+    @Test func automaticCheckUsesLastSuccessAndHandlesClockRollback() {
+        let interval: TimeInterval = 6 * 60 * 60
+        #expect(!AuralUpdateChecker.isCheckDue(lastCheck: 1_000, now: 1_000 + interval - 1, interval: interval))
+        #expect(AuralUpdateChecker.isCheckDue(lastCheck: 1_000, now: 1_000 + interval, interval: interval))
+        #expect(AuralUpdateChecker.isCheckDue(lastCheck: 1_000, now: 999, interval: interval))
+        #expect(AuralUpdateChecker.isCheckDue(lastCheck: 0, now: 1_000, interval: interval))
+    }
+
+    @MainActor
+    @Test func manualRequestPromotesInFlightBackgroundCheck() async throws {
+        let suite = "Aural.UpdateCheck.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        var continuation: CheckedContinuation<AuralAvailableUpdate?, Error>?
+        var requests = 0
+        let checker = AuralUpdateChecker(defaults: defaults, fetchUpdate: { _ in
+            requests += 1
+            return try await withCheckedThrowingContinuation { continuation = $0 }
+        })
+        checker.check(force: false)
+        while continuation == nil { await Task.yield() }
+        checker.check(force: true)
+        continuation?.resume(returning: nil)
+        while checker.isChecking { await Task.yield() }
+        #expect(requests == 1)
+        #expect(checker.didCheckWithoutUpdate)
+        #expect(checker.lastError == nil)
+    }
+
+    @MainActor
+    @Test func manualRequestPromotesBackgroundFailure() async throws {
+        let suite = "Aural.UpdateCheck.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        var continuation: CheckedContinuation<AuralAvailableUpdate?, Error>?
+        let checker = AuralUpdateChecker(defaults: defaults, fetchUpdate: { _ in
+            try await withCheckedThrowingContinuation { continuation = $0 }
+        })
+        checker.check(force: false)
+        while continuation == nil { await Task.yield() }
+        checker.check(force: true)
+        continuation?.resume(throwing: AuralUpdateError.httpFailure(503))
+        while checker.isChecking { await Task.yield() }
+        #expect(checker.lastError == "服务器返回 HTTP 503")
+        #expect(!checker.didCheckWithoutUpdate)
+    }
+
     @Test func newestReleaseWinsRegardlessOfFeedOrderAndUsesArm64DMG() throws {
         let data = try atomFeed([release("0.1.9"), release("0.1.11"), release("0.1.10")])
 
