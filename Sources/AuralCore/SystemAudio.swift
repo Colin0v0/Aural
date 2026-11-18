@@ -216,16 +216,18 @@ public enum SystemAudio {
     }
 
     private static func readSnapshot() throws -> SystemAudioSnapshot {
+        // 先读取当前默认输出，再枚举设备；失效对象只有在不属于当前默认输出时才可安全忽略。
+        let selected: AudioDeviceID = try HAL.read(HAL.system, HAL.address(kAudioHardwarePropertyDefaultOutputDevice), initial: 0)
         let ids = try HAL.ids(HAL.system, HAL.address(kAudioHardwarePropertyDevices))
         let outputs = try readOutputs(
             deviceIDs: ids,
+            requiredDeviceID: selected,
             readStreams: { try HAL.ids($0, HAL.address(kAudioDevicePropertyStreams, scope: kAudioDevicePropertyScopeOutput)) },
             readUID: { try HAL.string($0, kAudioDevicePropertyDeviceUID) },
             readName: { try HAL.string($0, kAudioObjectPropertyName) },
             readTransport: { try HAL.read($0, HAL.address(kAudioDevicePropertyTransportType), initial: UInt32(0)) },
             currentDeviceIDs: { try HAL.ids(HAL.system, HAL.address(kAudioHardwarePropertyDevices)) }
         )
-        let selected: AudioDeviceID = try HAL.read(HAL.system, HAL.address(kAudioHardwarePropertyDefaultOutputDevice), initial: 0)
         try requireSettledDefaultOutput(selected, outputs: outputs)
         return SystemAudioSnapshot(outputs: outputs, selectedID: selected,
                                    controls: readControls(for: outputs, readVolume: volume, readMute: mute))
@@ -241,6 +243,7 @@ public enum SystemAudio {
 
     /// 设备可能在系统列表与逐项读取之间重连；属性读取失败时先核对当前列表并重试一次。
     static func readOutputs(deviceIDs: [AudioDeviceID],
+                            requiredDeviceID: AudioDeviceID,
                             readStreams: (AudioDeviceID) throws -> [AudioObjectID],
                             readUID: (AudioDeviceID) throws -> String,
                             readName: (AudioDeviceID) throws -> String,
@@ -275,6 +278,12 @@ public enum SystemAudio {
                     }
                     if attempt == 1 {
                         if let failure = error as? AudioFailure, failure.status == HAL.badObjectStatus {
+                            // HAL 会长期保留部分已销毁设备；只要它不是当前默认输出，
+                            // 就不能让一个不可见的残留对象拖垮整份有效设备快照。
+                            if id != requiredDeviceID {
+                                completed = true
+                                continue
+                            }
                             throw AudioSnapshotPending(failure)
                         }
                         throw error
