@@ -257,7 +257,7 @@ let auralAudioCallback: AudioDeviceIOProc = { _, _, input, _, output, _, context
 @MainActor
 public final class ProcessAudioSession: ApplicationAudioSession {
     public let group: AudioProcessGroup
-    public let output: AudioOutput
+    public private(set) var output: AudioOutput
     public let mode: ApplicationAudioMode
     public private(set) var gain: Float = 1
     public private(set) var muted = false
@@ -269,9 +269,12 @@ public final class ProcessAudioSession: ApplicationAudioSession {
     private var started = false
     private var activityWatchdog = AudioActivityWatchdog()
     private var activeFormat: AudioStreamBasicDescription?
-    public let playbackRoute: ApplicationPlaybackRoute
+    private var tapDescription: CATapDescription?
+    private var suspendedForOutputChange = false
+    public private(set) var playbackRoute: ApplicationPlaybackRoute
     public var isActive: Bool { started }
     public var isReleased: Bool { tapID == 0 && aggregateID == 0 && ioProc == nil }
+    public var isSuspendedForOutputChange: Bool { suspendedForOutputChange }
 
     public init(group: AudioProcessGroup, output: AudioOutput,
                 playbackRoute: ApplicationPlaybackRoute? = nil,
@@ -295,6 +298,152 @@ public final class ProcessAudioSession: ApplicationAudioSession {
         defer { AudioSwitchTrace.end("StartApplicationSession", interval) }
         guard !group.objectIDs.isEmpty else { throw AudioFailure("应用尚未创建音频流") }
         guard tapID == 0, aggregateID == 0 else { throw AudioFailure("该应用已接管，不能重复启动") }
+        try validateOutputRoute(output, playbackRoute: playbackRoute)
+        do {
+            try validateRoutes(playbackRoute)
+            // 独立输出设备没有输入流，且仅有一个输出流，因此它的全局 stream 索引为 0。
+            // 显式限定来源，绝不把进程在其他设备上的声音混到系统默认输出。
+            let description = CATapDescription(processes: group.objectIDs,
+                                               deviceUID: playbackRoute.tapDeviceUID,
+                                               stream: 0)
+            description.uuid = UUID()
+            description.name = "Aural application audio"
+            description.isPrivate = true
+            // 计量不静音来源；混音才由本进程接管并重放音频。
+            description.muteBehavior = mode == .mixing ? .mutedWhenTapped : .unmuted
+            try HAL.check(AudioHardwareCreateProcessTap(description, &tapID), "创建应用音频捕获（请检查系统音频录制权限）")
+            tapDescription = description
+            let format: AudioStreamBasicDescription = try HAL.read(tapID, HAL.address(kAudioTapPropertyFormat), initial: AudioStreamBasicDescription())
+            try Self.validate(format)
+            activeFormat = format
+            let composition = playbackRoute.aggregateDescription(
+                tapUUID: description.uuid,
+                aggregateUID: "local.aural.tap.\(UUID().uuidString)"
+            )
+            try HAL.check(AudioHardwareCreateAggregateDevice(composition as CFDictionary, &aggregateID), "创建应用输出设备")
+            let actual: AudioStreamBasicDescription = try HAL.read(aggregateID, HAL.address(kAudioDevicePropertyStreamFormat, scope: kAudioDevicePropertyScopeOutput), initial: AudioStreamBasicDescription())
+            try Self.requireMatchingPCM(captured: format, current: actual)
+            // 从零平滑到用户预设，避免首次拖到低音量时先瞬间按 100% 播放。
+            let state = RenderState(sampleRate: format.mSampleRate, initialGain: 0, mode: mode,
+                                    effect: mode == .mixing ? effectSettings : nil)
+            state.target.store((muted ? Float(0) : gain).bitPattern, ordering: .relaxed)
+            renderState = state
+            try HAL.check(AudioDeviceCreateIOProcID(aggregateID, auralAudioCallback,
+                                                    Unmanaged.passUnretained(state).toOpaque(), &ioProc), "创建实时音频回调")
+            try HAL.check(AudioDeviceStart(aggregateID, ioProc), "启动应用音频处理")
+            started = true
+        } catch {
+            let failure = error.localizedDescription
+            if mode == .mixing, tapID != 0 {
+                // 已创建的成功 tap 正在静音来源；启动失败时只拆重放端，
+                // 不能为了清理错误把静音一起释放，否则应用会立即恢复原声。
+                var message = failure
+                do { try stopPlaybackAggregate() }
+                catch {
+                    message += "；停止失败的重放端时：\(error.localizedDescription)"
+                }
+                suspendedForOutputChange = true
+                if error is ApplicationRoutePending { throw error }
+                throw AudioFailure(message)
+            }
+            do { try stop() }
+            catch { throw AudioFailure("\(failure)；清理资源时：\(error.localizedDescription)") }
+            if error is ApplicationRoutePending { throw error }
+            throw AudioFailure(failure)
+        }
+    }
+
+    /// 输出切换只重建重放聚合，保留仍在静音来源的 process tap。
+    /// 这样静音应用不会在旧 tap 销毁与新 tap 建立之间短暂漏出原声。
+    public func suspendForOutputChange() throws {
+        let interval = AudioSwitchTrace.begin("SuspendApplicationOutput")
+        defer { AudioSwitchTrace.end("SuspendApplicationOutput", interval) }
+        guard started, tapID != 0, let description = tapDescription else {
+            throw AudioFailure("应用音频会话尚未启动，不能暂停输出路由")
+        }
+        do {
+            try stopPlaybackAggregate()
+            // 解除设备绑定后 tap 跟随进程，不再受系统默认输出切换影响。
+            description.deviceUID = nil
+            description.stream = nil
+            try AudioHardwareTap(id: tapID).setDescription(description)
+            suspendedForOutputChange = true
+        } catch {
+            let failure = error.localizedDescription
+            // 暂停失败也不能销毁 tap：旧输出仍是当前系统输出时，
+            // 保持原静音比“清理成功但漏出原声”更安全。
+            suspendedForOutputChange = true
+            throw AudioFailure(failure)
+        }
+    }
+
+    public func switchOutput(to output: AudioOutput, playbackRoute: ApplicationPlaybackRoute) throws {
+        let interval = AudioSwitchTrace.begin("SwitchApplicationOutput")
+        defer { AudioSwitchTrace.end("SwitchApplicationOutput", interval) }
+        guard tapID != 0, let description = tapDescription,
+              (started || suspendedForOutputChange) else {
+            throw AudioFailure("应用音频会话尚未启动，不能切换输出")
+        }
+        try validateOutputRoute(output, playbackRoute: playbackRoute)
+        do {
+            try validateRoutes(playbackRoute)
+            try stopPlaybackAggregate()
+
+            // process tap 始终保留；先更新来源设备再重建聚合，原声仍由 tap 持续静音。
+            description.deviceUID = playbackRoute.tapDeviceUID
+            description.stream = 0
+            try AudioHardwareTap(id: tapID).setDescription(description)
+            tapDescription = description
+            let format: AudioStreamBasicDescription = try HAL.read(tapID, HAL.address(kAudioTapPropertyFormat), initial: AudioStreamBasicDescription())
+            try Self.validate(format)
+            let composition = playbackRoute.aggregateDescription(
+                tapUUID: description.uuid,
+                aggregateUID: "local.aural.tap.\(UUID().uuidString)"
+            )
+            try HAL.check(AudioHardwareCreateAggregateDevice(composition as CFDictionary, &aggregateID), "创建新的应用输出设备")
+            let actual: AudioStreamBasicDescription = try HAL.read(aggregateID, HAL.address(kAudioDevicePropertyStreamFormat, scope: kAudioDevicePropertyScopeOutput), initial: AudioStreamBasicDescription())
+            try Self.requireMatchingPCM(captured: format, current: actual)
+            let state = RenderState(sampleRate: format.mSampleRate, initialGain: 0, mode: mode,
+                                    effect: mode == .mixing ? effectSettings : nil)
+            state.target.store((muted ? Float(0) : gain).bitPattern, ordering: .relaxed)
+            renderState = state
+            activeFormat = format
+            activityWatchdog = AudioActivityWatchdog()
+            try HAL.check(AudioDeviceCreateIOProcID(aggregateID, auralAudioCallback,
+                                                    Unmanaged.passUnretained(state).toOpaque(), &ioProc), "创建新的实时音频回调")
+            try HAL.check(AudioDeviceStart(aggregateID, ioProc), "启动新的应用音频处理")
+            self.output = output
+            self.playbackRoute = playbackRoute
+            suspendedForOutputChange = false
+            started = true
+        } catch {
+            let failure = error.localizedDescription
+            if let pending = error as? ApplicationRoutePending {
+                // 传播等待或格式过渡时只拆重放端，保留已经静音的 process tap。
+                var message = failure
+                do {
+                    try stopPlaybackAggregate()
+                    suspendedForOutputChange = true
+                } catch {
+                    // 停止重放本身失败时仍保留 tap；后续重试可以继续复用同一静音来源。
+                    suspendedForOutputChange = true
+                    message += "；停止重放端时：\(error.localizedDescription)"
+                }
+                if message == failure { throw pending }
+                throw AudioFailure(message)
+            }
+            // 新目标创建失败时，旧重放端已经停止，但 process tap 仍能保持来源静音。
+            // 这里保留 tap，等下一次明确重试时复用，绝不通过 stop() 让原声恢复。
+            var message = failure
+            do { try stopPlaybackAggregate() }
+            catch { message += "；停止重放端时：\(error.localizedDescription)" }
+            suspendedForOutputChange = true
+            throw AudioFailure(message)
+        }
+    }
+
+    private func validateOutputRoute(_ output: AudioOutput,
+                                     playbackRoute: ApplicationPlaybackRoute) throws {
         guard !output.isAggregate || output.isAuralMultiOutput else {
             throw AudioFailure("第三方聚合输出暂不支持 APP 独立音量或实时电平")
         }
@@ -318,50 +467,29 @@ public final class ProcessAudioSession: ApplicationAudioSession {
                 throw AudioFailure("单设备输出的 APP 音频路由无效")
             }
         }
-        do {
-            guard try HAL.ids(output.id, HAL.address(kAudioDevicePropertyStreams, scope: kAudioDevicePropertyScopeInput)).isEmpty else {
-                throw AudioFailure("本阶段仅支持独立输出设备，不接管带输入流的双工音频接口")
-            }
-            guard try HAL.ids(output.id, HAL.address(kAudioDevicePropertyStreams, scope: kAudioDevicePropertyScopeOutput)).count == 1 else {
-                throw AudioFailure("本阶段仅支持单个输出流的设备")
-            }
-            try validateRoutes()
-            // 独立输出设备没有输入流，且仅有一个输出流，因此它的全局 stream 索引为 0。
-            // 显式限定来源，绝不把进程在其他设备上的声音混到系统默认输出。
-            let description = CATapDescription(processes: group.objectIDs,
-                                               deviceUID: playbackRoute.tapDeviceUID,
-                                               stream: 0)
-            description.uuid = UUID()
-            description.name = "Aural application audio"
-            description.isPrivate = true
-            // 计量不静音来源；混音才由本进程接管并重放音频。
-            description.muteBehavior = mode == .mixing ? .mutedWhenTapped : .unmuted
-            try HAL.check(AudioHardwareCreateProcessTap(description, &tapID), "创建应用音频捕获（请检查系统音频录制权限）")
-            let format: AudioStreamBasicDescription = try HAL.read(tapID, HAL.address(kAudioTapPropertyFormat), initial: AudioStreamBasicDescription())
-            try Self.validate(format)
-            activeFormat = format
-            let composition = playbackRoute.aggregateDescription(
-                tapUUID: description.uuid,
-                aggregateUID: "local.aural.tap.\(UUID().uuidString)"
-            )
-            try HAL.check(AudioHardwareCreateAggregateDevice(composition as CFDictionary, &aggregateID), "创建应用输出设备")
-            let actual: AudioStreamBasicDescription = try HAL.read(aggregateID, HAL.address(kAudioDevicePropertyStreamFormat, scope: kAudioDevicePropertyScopeOutput), initial: AudioStreamBasicDescription())
-            try Self.requireMatchingPCM(captured: format, current: actual)
-            // 从零平滑到用户预设，避免首次拖到低音量时先瞬间按 100% 播放。
-            let state = RenderState(sampleRate: format.mSampleRate, initialGain: 0, mode: mode,
-                                    effect: mode == .mixing ? effectSettings : nil)
-            state.target.store((muted ? Float(0) : gain).bitPattern, ordering: .relaxed)
-            renderState = state
-            try HAL.check(AudioDeviceCreateIOProcID(aggregateID, auralAudioCallback,
-                                                    Unmanaged.passUnretained(state).toOpaque(), &ioProc), "创建实时音频回调")
-            try HAL.check(AudioDeviceStart(aggregateID, ioProc), "启动应用音频处理")
-            started = true
-        } catch {
-            let failure = error.localizedDescription
-            do { try stop() }
-            catch { throw AudioFailure("\(failure)；清理资源时：\(error.localizedDescription)") }
-            if error is ApplicationRoutePending { throw error }
-            throw AudioFailure(failure)
+        guard try HAL.ids(output.id, HAL.address(kAudioDevicePropertyStreams, scope: kAudioDevicePropertyScopeInput)).isEmpty else {
+            throw AudioFailure("本阶段仅支持独立输出设备，不接管带输入流的双工音频接口")
+        }
+        guard try HAL.ids(output.id, HAL.address(kAudioDevicePropertyStreams, scope: kAudioDevicePropertyScopeOutput)).count == 1 else {
+            throw AudioFailure("本阶段仅支持单个输出流的设备")
+        }
+    }
+
+    /// 只释放重放聚合和回调，process tap 继续持有静音。
+    private func stopPlaybackAggregate() throws {
+        if started {
+            try HAL.check(AudioDeviceStop(aggregateID, ioProc), "停止旧输出音频回调")
+            started = false
+        }
+        if let ioProc {
+            try HAL.check(AudioDeviceDestroyIOProcID(aggregateID, ioProc), "释放旧输出音频回调")
+            self.ioProc = nil
+        }
+        renderState = nil
+        activeFormat = nil
+        if aggregateID != 0 {
+            try HAL.check(AudioHardwareDestroyAggregateDevice(aggregateID), "释放旧应用输出设备")
+            aggregateID = 0
         }
     }
 
@@ -406,12 +534,12 @@ public final class ProcessAudioSession: ApplicationAudioSession {
         renderState?.setEffect(effectSettings)
     }
 
-    private func validateRoutes() throws {
+    private func validateRoutes(_ route: ApplicationPlaybackRoute) throws {
         // HAL 默认路由确认后，各 APP 的进程对象仍可能稍晚更新；只读取事实，不阻塞主线程。
         let routes = try processOutputRoutes()
-        guard playbackRoute.acceptsActiveProcessRoutes(routes) else {
+        guard route.acceptsActiveProcessRoutes(routes) else {
             let actual = routes.filter(\.isRunningOutput).flatMap(\.deviceUIDs).joined(separator: ",")
-            throw ApplicationRoutePending(detail: "expected=\(playbackRoute.sourceOutputUID); actual=\(actual)")
+            throw ApplicationRoutePending(detail: "expected=\(route.sourceOutputUID); actual=\(actual)")
         }
     }
 
@@ -427,7 +555,7 @@ public final class ProcessAudioSession: ApplicationAudioSession {
 
     public func checkHealth(expectingAudio: Bool = true) throws {
         guard started else { throw AudioFailure("音频接管未成功启动，正在重试释放残留资源") }
-        try validateRoutes()
+        try validateRoutes(playbackRoute)
         // 自定义子集的主时钟可能不是公开聚合主成员，必须读取本会话实际创建的重放聚合格式。
         let actual: AudioStreamBasicDescription = try HAL.read(aggregateID,
             HAL.address(kAudioDevicePropertyStreamFormat, scope: kAudioDevicePropertyScopeOutput),
@@ -459,6 +587,8 @@ public final class ProcessAudioSession: ApplicationAudioSession {
         renderState = nil
         effectSettings = nil
         activeFormat = nil
+        tapDescription = nil
+        suspendedForOutputChange = false
         if aggregateID != 0 {
             try HAL.check(AudioHardwareDestroyAggregateDevice(aggregateID), "释放应用输出设备")
             aggregateID = 0

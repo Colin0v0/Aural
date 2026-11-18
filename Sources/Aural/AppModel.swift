@@ -147,7 +147,8 @@ final class AppModel: ObservableObject {
         }
         routing.isUserSelectingOutput = userIsSelectingOutput ?? SystemOutputPicker.isInUse
         routing.beforeChanging = { [weak self] in
-            guard let self, self.stopAll() else { throw AudioFailure("旧 APP 音频资源尚未释放，未切换输出") }
+            guard let self else { return }
+            try self.suspendApplicationsForOutputChange()
             self.sessionRouteWaitSince.removeAll()
         }
         routing.didChange = { [weak self] state in
@@ -348,16 +349,25 @@ final class AppModel: ObservableObject {
             if audio != observed { audio = observed }
             if audioError != nil { audioError = nil }
             if let confirmed = outputRouting.confirmed, !outputRouting.phase.isBusy {
+                // 路由请求可能在一次硬件读回内直接确认，不能让 APP 仍绑定旧输出后误判为外部变化。
+                // rebind 本身只修改发生变化的托管行，不会在每轮轮询里重复发布状态。
+                rebindManagedApplications(to: confirmed.output.uid)
                 if previous != confirmed {
                     sessionRouteWaitSince.removeAll()
                     if outputRouting.phase == .stable { pendingApplicationReapplies.removeAll() }
                 }
                 // 明确请求确认后，以及外部媒体路由变化后，都跟随真实目标；真实 APP 错误仍不清除。
-                rebindManagedApplications(to: confirmed.output.uid)
                 if outputRouting.phase == .confirmed { completePendingApplicationReapplies(on: confirmed) }
             } else {
-                // 切换期只暂停会话；真正失败保留意图与资源错误，不再伪装成已经应用。
-                for key in Array(sessions.keys) where cleanupErrors[key] == nil { stop(key) }
+                // 切换期和失败态都优先保留静音 tap。
+                // 非用户主动停止时销毁 tap 会立即恢复 App 原声，比短暂无声更危险。
+                for key in Array(sessions.keys) where cleanupErrors[key] == nil {
+                    if outputRouting.phase.isBusy,
+                       sessions[key]?.isSuspendedForOutputChange == true {
+                        continue
+                    }
+                    _ = preserveMixingSession(key)
+                }
                 if outputRouting.phase == .failed {
                     pendingApplicationReapplies.removeAll()
                     for key in Array(mixStates.keys) where mixStates[key]?.managed == true && mixStates[key]?.failure == nil {
@@ -402,7 +412,10 @@ final class AppModel: ObservableObject {
         if audio != nil { audio = nil }
         headphoneControl = HeadphoneControlSelection()
         if observesHeadphones { headphones.outputUnavailable() }
-        for key in Array(sessions.keys) where cleanupErrors[key] == nil { stop(key) }
+        // 快照暂时不可信只撤销旧路由的使用资格，不销毁正在静音的 tap。
+        for key in Array(sessions.keys) where cleanupErrors[key] == nil {
+            _ = preserveMixingSession(key)
+        }
     }
 
     /// 只在等待 HAL 时短周期读取同一目标；不重复发出写请求，也不阻塞 UI 主线程。
@@ -932,8 +945,47 @@ final class AppModel: ObservableObject {
         for key in Array(mixStates.keys) where mixStates[key]?.managed == true {
             latchApplicationFailure(reason, for: key)
         }
-        // 自动生命周期处理只尝试一次；已知释放失败必须由用户明确重试。
-        for key in Array(sessions.keys) where cleanupErrors[key] == nil { stop(key) }
+        // 自动生命周期处理只尝试一次；已知失败必须由用户明确重试。
+        // 但暂停不等于释放：mixing tap 必须保留，唤醒或恢复读取后再决定是否继续重放。
+        for key in Array(sessions.keys) where cleanupErrors[key] == nil {
+            _ = preserveMixingSession(key)
+        }
+    }
+
+    /// 切换输出前保留混音会话的 tap，并解除设备绑定，让静音覆盖系统默认输出切换。
+    private func suspendApplicationsForOutputChange() throws {
+        for key in Array(sessions.keys) {
+            guard cleanupErrors[key] == nil, let session = sessions[key] else { continue }
+            if session.isSuspendedForOutputChange { continue }
+            guard session.mode == .mixing, session.isActive else {
+                guard stop(key) else { throw AudioFailure("旧 APP 音频资源尚未释放，未切换输出") }
+                continue
+            }
+            do {
+                try session.suspendForOutputChange()
+            } catch {
+                cleanupErrors[key] = "\(session.group.label)：\(error.localizedDescription)"
+                latchApplicationFailure("音频资源未能暂停，请点击重试释放。", for: key)
+                throw AudioFailure("旧 APP 音频资源尚未暂停，未切换输出")
+            }
+        }
+    }
+
+    /// 非用户主动停止时保留 mixing tap，只拆除重放端。
+    /// metering 会话不影响原声，仍可按普通资源释放；真正需要销毁 tap 的入口必须显式调用 stop。
+    @discardableResult
+    private func preserveMixingSession(_ key: String) -> Bool {
+        guard let session = sessions[key] else { return true }
+        guard session.mode == .mixing else { return stop(key) }
+        if session.isSuspendedForOutputChange { return true }
+        do {
+            try session.suspendForOutputChange()
+            return true
+        } catch {
+            cleanupErrors[key] = "\(session.group.label)：\(error.localizedDescription)"
+            latchApplicationFailure("音频资源未能暂停，请点击重试释放。", for: key)
+            return false
+        }
     }
 
     private func reconcileSessions() {
@@ -950,7 +1002,16 @@ final class AppModel: ObservableObject {
         guard var state = mixStates[app.id], cleanupErrors[app.id] == nil else { return }
         guard !outputRouting.phase.isBusy, outputRouting.phase != .failed,
               let confirmed = outputRouting.confirmed,
-              processError == nil else { stop(app.id); return }
+              processError == nil else {
+            // 切换中、失败态或进程读取暂时不可信时，mixing 会话只能暂停重放，
+            // 不能销毁 tap；否则用户正在静音或压低音量的 App 会立即恢复原声。
+            if let session = sessions[app.id], session.mode == .mixing {
+                _ = preserveMixingSession(app.id)
+                return
+            }
+            stop(app.id)
+            return
+        }
         let output = confirmed.output
         if output.isAggregate {
             // 只有本进程刚建立、且仍与当前快照一致的 Aural 聚合才能被接管；
@@ -975,6 +1036,13 @@ final class AppModel: ObservableObject {
             requiresRouting: requiresRouting,
             requiresEffects: requiresEffects
         ) else {
+            // 已锁存失败时保留静音中的 mixing tap，等待用户明确重新应用；
+            // 只有用户主动关闭管理意图时才真正释放并恢复原声。
+            if state.failure != nil, let session = sessions[app.id],
+               session.mode == .mixing {
+                _ = preserveMixingSession(app.id)
+                return
+            }
             stop(app.id)
             return
         }
@@ -999,8 +1067,7 @@ final class AppModel: ObservableObject {
         }
         let expectedPlaybackRoute = requestedPlaybackRoute ?? .single(output)
         if let session = sessions[app.id], session.mode == mode,
-           session.group.objectIDs == group.objectIDs, session.output.uid == output.uid,
-           session.playbackRoute == expectedPlaybackRoute {
+           session.group.objectIDs == group.objectIDs {
             do {
                 if mode == .mixing {
                     try session.setGain(state.gain)
@@ -1009,10 +1076,24 @@ final class AppModel: ObservableObject {
                 } else {
                     session.setEffect(nil)
                 }
+                if session.output.uid != output.uid
+                    || session.playbackRoute != expectedPlaybackRoute
+                    || session.isSuspendedForOutputChange {
+                    // 复用同一个 process tap，避免静音来源在旧 tap 销毁与新 tap 建立之间短暂漏声。
+                    // 输出 UID 未变时也可能经历过暂停（例如媒体与提示音默认值重新对齐），仍要恢复重放。
+                    try session.switchOutput(to: output, playbackRoute: expectedPlaybackRoute)
+                }
                 try session.checkHealth(expectingAudio: app.isRunningOutput)
             } catch {
                 recordSessionFailure(error, for: app.id)
-                stop(app.id)
+                // 应用路由传播可能晚于 HAL；此时保留已静音的 tap 继续重试，
+                // 直接 stop 会重新暴露原声，反而制造短暂漏音。
+                if error is ApplicationRoutePending { return }
+                if session.mode == .mixing {
+                    _ = preserveMixingSession(app.id)
+                } else {
+                    stop(app.id)
+                }
             }
         } else {
             // 计量与混音共享所有权检查；必须完整释放旧 tap 后才能改变 muteBehavior。
@@ -1276,8 +1357,18 @@ final class AppModel: ObservableObject {
             refreshAudio()
         }
         guard let confirmed = outputRouting.confirmed, !outputRouting.phase.isBusy,
-              stop(id), var state = mixStates[id] else { return }
+              var state = mixStates[id] else { return }
         sessionRouteWaitSince.removeValue(forKey: id)
+        if let session = sessions[id], session.mode == .mixing,
+           session.isSuspendedForOutputChange {
+            // 失败期间保留的 tap 仍在静音来源；重新应用只恢复重放端，不能先 stop 再新建。
+            state.enable(outputUID: confirmed.output.uid)
+            mixStates[id] = state
+            operationError = nil
+            if let app = applications.first(where: { $0.id == id }) { reconcile(app) }
+            return
+        }
+        guard stop(id) else { return }
         state.enable(outputUID: confirmed.output.uid)
         mixStates[id] = state
         operationError = nil
@@ -1340,7 +1431,10 @@ final class AppModel: ObservableObject {
         } catch {
             recordSessionFailure(error, for: group.id)
             if session.isReleased { sessions.removeValue(forKey: group.id) }
-            else { cleanupErrors[group.id] = "\(group.label)：\(error.localizedDescription)" }
+            else if !session.isSuspendedForOutputChange {
+                // 启动失败但 tap 已进入静音保活时保留会话；这里只记录真正的清理失败。
+                cleanupErrors[group.id] = "\(group.label)：\(error.localizedDescription)"
+            }
         }
     }
 

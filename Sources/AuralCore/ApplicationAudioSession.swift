@@ -10,10 +10,15 @@ public protocol ApplicationAudioSession: AnyObject {
     var playbackRoute: ApplicationPlaybackRoute { get }
     var isActive: Bool { get }
     var isReleased: Bool { get }
+    var isSuspendedForOutputChange: Bool { get }
     func setGain(_ value: Float) throws
     func setMuted(_ value: Bool)
     /// 音效参数通过会话拥有的原子槽下发；不重建 tap，也不在音频线程同步界面状态。
     func setEffect(_ settings: AppAudioEffectSettings?)
+    /// 输出路由切换前保留 tap 并解除设备绑定，让静音覆盖过渡期。
+    func suspendForOutputChange() throws
+    /// 同一应用的输出目标变化时保留现有 tap，只重建重放聚合，避免捕获静音出现空档。
+    func switchOutput(to output: AudioOutput, playbackRoute: ApplicationPlaybackRoute) throws
     func start() throws
     func checkHealth(expectingAudio: Bool) throws
     func stop() throws
