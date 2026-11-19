@@ -103,6 +103,139 @@ struct OutputRoutingIntegrationTests {
         #expect(model.shutdown())
     }
 
+    /// 用户日志里的 2003332927 是 who?（属性暂不可读），不能只测试 !obj 分支。
+    @Test func briefUnknownPropertyReadDoesNotLatchTheRecoveredRoute() throws {
+        let hardware = RoutingTestHardware()
+        let audio = SessionFixture()
+        let model = AppModel(outputHardware: hardware.hardware, startsMonitoring: false,
+                             applicationAudio: audio.environment)
+        model.setApplicationGain(0.3, for: audio.row.id)
+        model.toggleApplicationMute(audio.row.id)
+        let session = try #require(audio.sessions.last)
+        hardware.snapshotError = AudioFailure("读取音频名称失败（Core Audio 2003332927）",
+                                              status: kAudioHardwareUnknownPropertyError)
+        model.refresh()
+        #expect(model.audio == nil)
+        #expect(model.audioError == nil)
+        #expect(model.outputRouting.error == nil)
+        #expect(session.isSuspendedForOutputChange)
+
+        audio.now = audio.now.addingTimeInterval(0.1)
+        hardware.snapshotError = nil
+        model.refresh()
+        #expect(model.audio != nil)
+        #expect(model.audioError == nil)
+        #expect(model.outputRouting.phase == .stable)
+        #expect(model.outputRouting.error == nil)
+        #expect(model.outputRouting.confirmed?.output.uid == "speaker")
+        #expect(model.sessions[audio.row.id] === session)
+        #expect(session.isActive)
+        #expect(session.muted)
+        #expect(session.stopCount == 0)
+        #expect(hardware.selections.isEmpty)
+        #expect(model.shutdown())
+    }
+
+    /// 持续缺失的属性必须报告，但完整读回后不能让旧红字和失败态永久保留。
+    @Test func persistentUnknownPropertyReadClearsOnlyItsOwnFailureAfterRecovery() {
+        let hardware = RoutingTestHardware()
+        let audio = SessionFixture()
+        let model = AppModel(outputHardware: hardware.hardware, startsMonitoring: false,
+                             applicationAudio: audio.environment)
+        hardware.snapshotError = AudioFailure("读取音频名称失败（Core Audio 2003332927）",
+                                              status: kAudioHardwareUnknownPropertyError)
+        model.refresh()
+        audio.now = audio.now.addingTimeInterval(4)
+        model.refresh()
+        #expect(model.audioError != nil)
+        #expect(model.outputRouting.phase == .failed)
+        // 多次失败不应丢掉“这次是只读观察失败”的来源身份。
+        model.refresh()
+        audio.now = audio.now.addingTimeInterval(60)
+        hardware.snapshotError = nil
+        model.refresh()
+        #expect(model.audioError == nil)
+        #expect(model.outputRouting.error == nil)
+        #expect(model.outputRouting.phase == .stable)
+        #expect(model.outputRouting.confirmed?.output.uid == "speaker")
+        #expect(hardware.selections.isEmpty)
+        #expect(model.shutdown())
+    }
+
+    /// 持续观察失败期间保留静音；路由恢复也不能擅自清掉应用的失败锁存。
+    @Test func recoveringPropertyReadsKeepsFailedManagedAudioMutedUntilReapply() throws {
+        let hardware = RoutingTestHardware()
+        let audio = SessionFixture()
+        let model = AppModel(outputHardware: hardware.hardware, startsMonitoring: false,
+                             applicationAudio: audio.environment)
+        model.toggleApplicationMute(audio.row.id)
+        let session = try #require(audio.sessions.last)
+        hardware.snapshotError = AudioFailure("读取音频名称失败（Core Audio 2003332927）",
+                                              status: kAudioHardwareUnknownPropertyError)
+        model.refresh()
+        audio.now = audio.now.addingTimeInterval(4)
+        model.refresh()
+        #expect(model.mixStates[audio.row.id]?.failure != nil)
+        #expect(session.isSuspendedForOutputChange)
+        hardware.snapshotError = nil
+        model.refresh()
+        #expect(model.outputRouting.phase == .stable)
+        #expect(model.outputRouting.error == nil)
+        #expect(model.mixStates[audio.row.id]?.failure != nil)
+        #expect(!session.isActive)
+        #expect(session.stopCount == 0)
+        model.applyApplication(audio.row.id)
+        #expect(model.mixStates[audio.row.id]?.failure == nil)
+        #expect(model.sessions[audio.row.id] === session)
+        #expect(session.isActive)
+        #expect(session.muted)
+        #expect(session.stopCount == 0)
+        #expect(model.shutdown())
+    }
+
+    /// 相同错误码发生在用户明确切换期间，仍是真实操作失败，不能被自动观察恢复抹掉。
+    @Test func explicitSelectionPropertyFailureStillRequiresUserRetry() {
+        let hardware = RoutingTestHardware()
+        let audio = SessionFixture()
+        let model = AppModel(outputHardware: hardware.hardware, startsMonitoring: false,
+                             applicationAudio: audio.environment)
+        hardware.snapshotError = AudioFailure("读取音频名称失败（Core Audio 2003332927）",
+                                              status: kAudioHardwareUnknownPropertyError)
+        model.selectOutput(2)
+        let explicitFailure = model.outputRouting.error
+        #expect(explicitFailure != nil)
+        #expect(model.outputRouting.phase == .failed)
+        hardware.snapshotError = nil
+        model.refresh()
+        #expect(model.outputRouting.phase == .failed)
+        #expect(model.outputRouting.error == explicitFailure)
+        #expect(hardware.selections.isEmpty)
+        model.selectOutput(1)
+        #expect(model.shutdown())
+    }
+
+    /// 观察恢复不能顺手清除之前真实发生过的组合创建失败。
+    @Test func recoveredSnapshotNeverClearsAnEarlierExplicitRouteFailure() {
+        let hardware = RoutingTestHardware()
+        let audio = SessionFixture()
+        let model = AppModel(outputHardware: hardware.hardware, startsMonitoring: false,
+                             applicationAudio: audio.environment)
+        hardware.failCreation = true
+        #expect(!model.startSimultaneousOutput(["speaker", "headphone"]))
+        let explicitFailure = model.outputRouting.error
+        #expect(explicitFailure != nil)
+        hardware.snapshotError = AudioFailure("读取音频名称失败（Core Audio 2003332927）",
+                                              status: kAudioHardwareUnknownPropertyError)
+        model.refresh()
+        hardware.snapshotError = nil
+        model.refresh()
+        #expect(model.outputRouting.phase == .failed)
+        #expect(model.outputRouting.error == explicitFailure)
+        hardware.failCreation = false
+        model.selectOutput(1)
+        #expect(model.shutdown())
+    }
+
     @Test func uncertainSnapshotKeepsTheMutedTapAndRestoresReplayAfterRecovery() {
         let hardware = RoutingTestHardware()
         let audio = SessionFixture()

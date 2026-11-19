@@ -20,6 +20,7 @@ final class RoutingTestHardware {
     var failSnapshotAfterNextSelection = false
     var afterDestroy: ((AudioDeviceID) -> Void)?
     var failSnapshot = false
+    var snapshotError: Error?
     var pendingSnapshot = false
     var snapshotReads = 0
     var keepAfterDestroy = false
@@ -52,6 +53,7 @@ final class RoutingTestHardware {
     var hardware: MultiOutputHardware {
         MultiOutputHardware(snapshot: {
             self.snapshotReads += 1
+            if let error = self.snapshotError { throw error }
             if self.failSnapshot { throw AudioFailure("快照读取失败") }
             if self.pendingSnapshot {
                 throw AudioSnapshotPending(AudioFailure("读取音频名称失败", status: HAL.badObjectStatus))

@@ -22,6 +22,12 @@ struct SystemAudioTests {
         #expect(HAL.badObjectStatus != OSStatus(kAudioHardwareUnknownPropertyError))
     }
 
+    @Test func reportedWhoStatusIsAnUnknownPropertyNotABadObject() {
+        // 直接校验用户日志里的十进制状态码，不能再用 !obj 夹具替代 who?。
+        #expect(OSStatus(kAudioHardwareUnknownPropertyError) == 2_003_332_927)
+        #expect(OSStatus(kAudioHardwareUnknownPropertyError) != HAL.badObjectStatus)
+    }
+
     @Test func invalidObjectStillListedProducesPendingSnapshotInsteadOfPartialSuccess() {
         var nameReads = 0
         do {
@@ -321,5 +327,5 @@ struct SystemAudioTests {
         #expect(!SystemAudio.activeAggregateRouteContains("other", composition: composition as CFDictionary, activeUIDs: ["other"]))
     }
 
-    @Test func versionIsDefined() { #expect(AuralVersion.current == "0.3.7") }
+    @Test func versionIsDefined() { #expect(AuralVersion.current == "0.3.8") }
 }
