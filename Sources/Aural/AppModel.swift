@@ -30,37 +30,62 @@ private enum SystemOutputPicker {
 final class AppModel: ObservableObject {
     static let shared = AppModel()
     private static let audioLog = Logger(subsystem: "local.aural.app", category: "ApplicationAudio")
+    /// 诊断事件只保留近期状态变化；容量与去重由日志对象统一约束。
+    let diagnosticEventLog = DiagnosticEventLog()
     let headphones: HeadphoneControllerGroup
     private let observesHeadphones: Bool
     @Published private(set) var headphoneControl = HeadphoneControlSelection()
     @Published private(set) var audio: SystemAudioSnapshot?
-    @Published private(set) var audioError: String?
+    @Published private(set) var audioError: String? {
+        didSet { recordDiagnosticChange("audio", old: oldValue, new: audioError) }
+    }
     @Published private(set) var inputAudio: SystemInputSnapshot?
-    @Published private(set) var inputError: String?
-    @Published private(set) var inputOperationError: String?
+    @Published private(set) var inputError: String? {
+        didSet { recordDiagnosticChange("input", old: oldValue, new: inputError) }
+    }
+    @Published private(set) var inputOperationError: String? {
+        didSet { recordDiagnosticChange("inputOperation", old: oldValue, new: inputOperationError) }
+    }
     @Published private(set) var applications: [ApplicationAudioRow] = []
     /// 展示列表独立于实时进程目录；切路由时保留行身份，不用短暂的停流驱动界面增删。
     @Published private(set) var playingApplications: [ApplicationAudioRow] = []
     @Published private(set) var registeredProcessCount = 0
-    @Published private(set) var audioCaptureAccess: SystemAudioCaptureAccess = .notDetermined
-    @Published private(set) var processError: String?
+    @Published private(set) var audioCaptureAccess: SystemAudioCaptureAccess = .notDetermined {
+        didSet {
+            guard oldValue != audioCaptureAccess else { return }
+            diagnosticEventLog.record(category: "permission", message: audioCaptureAccess.rawValue)
+        }
+    }
+    @Published private(set) var processError: String? {
+        didSet { recordDiagnosticChange("process", old: oldValue, new: processError) }
+    }
     @Published private(set) var mixStates: [String: ApplicationMixState] = [:]
     @Published private(set) var sessions: [String: any ApplicationAudioSession] = [:]
     /// 仅按稳定 bundle 身份保存；界面行 ID 可能是临时的 unassigned/pid 身份。
     @Published private(set) var appAudioRoutes: [String: AppAudioRoute] = [:]
-    @Published private(set) var appAudioRoutePersistenceError: String?
+    @Published private(set) var appAudioRoutePersistenceError: String? {
+        didSet { recordDiagnosticChange("appAudioRoutePersistence", old: oldValue, new: appAudioRoutePersistenceError) }
+    }
     /// 每个应用的音效设置独立于音量、静音和路由，按 bundle 身份持久化。
     @Published private(set) var appAudioEffects: [String: AppAudioEffectSettings] = [:]
-    @Published private(set) var appAudioEffectPersistenceError: String?
+    @Published private(set) var appAudioEffectPersistenceError: String? {
+        didSet { recordDiagnosticChange("appAudioEffectPersistence", old: oldValue, new: appAudioEffectPersistenceError) }
+    }
     /// 自定义预设全局共享；每个 App 只引用预设 ID，后续重命名不会破坏已有引用。
     @Published private(set) var appAudioEffectCustomPresets: [AppAudioEffectCustomPreset] = []
     /// A/B 只旁路当前窗口的试听，不修改持久化开关，也不会让其他 App 暂时静音。
     @Published private(set) var bypassedApplicationAudioEffectKeys: Set<String> = []
     /// 总开关只控制功能入口和运行时音效，不清除各应用已保存的预设。
     @Published private(set) var applicationEffectsEnabled = false
-    @Published var operationError: String?
-    @Published private(set) var cleanupErrors: [String: String] = [:]
-    @Published private(set) var outputRouting = OutputRoutingState()
+    @Published var operationError: String? {
+        didSet { recordDiagnosticChange("operation", old: oldValue, new: operationError) }
+    }
+    @Published private(set) var cleanupErrors: [String: String] = [:] {
+        didSet { recordCleanupErrorChanges(from: oldValue) }
+    }
+    @Published private(set) var outputRouting = OutputRoutingState() {
+        didSet { recordRoutingChange(from: oldValue) }
+    }
     var multiOutputRoute: MultiOutputRoute? { outputRouting.confirmed?.aggregate }
     var multiOutputError: String? { outputRouting.error }
     var singleOutputTargetUID: String? {
@@ -183,6 +208,8 @@ final class AppModel: ObservableObject {
             operationError = error.localizedDescription
         }
         refresh()
+        diagnosticEventLog.record(category: "lifecycle",
+                                  message: "launched Aural \(AuralVersion.current)")
         guard monitorsSystem else { return }
         // 从系统设置返回后复查授权，不信任首次启动的“已经申请过”标记。
         activationObserver = NotificationCenter.default.addObserver(
@@ -198,6 +225,7 @@ final class AppModel: ObservableObject {
                                                                           object: nil, queue: .main) { [weak self] _ in
             Task { @MainActor in
                 guard let self else { return }
+                self.diagnosticEventLog.record(category: "lifecycle", message: "system will sleep")
                 self.headphones.suspend()
                 self.pauseManagedApplications("已在休眠前暂停应用音量；唤醒后请点重新应用。")
             }
@@ -206,10 +234,51 @@ final class AppModel: ObservableObject {
                                                                          object: nil, queue: .main) { [weak self] _ in
             Task { @MainActor in
                 guard let self, !self.isShutdown else { return }
+                self.diagnosticEventLog.record(category: "lifecycle", message: "system did wake")
                 self.headphones.resume()
                 self.refresh()
             }
         }
+    }
+
+    private func recordDiagnosticChange(_ category: String, old: String?, new: String?) {
+        guard old != new else { return }
+        diagnosticEventLog.record(category: category, message: new ?? "cleared")
+    }
+
+    private func recordCleanupErrorChanges(from previous: [String: String]) {
+        for key in Set(previous.keys).union(cleanupErrors.keys).sorted() {
+            guard previous[key] != cleanupErrors[key] else { continue }
+            if let message = cleanupErrors[key] {
+                diagnosticEventLog.record(category: "cleanup", message: "\(key): \(message)")
+            } else {
+                diagnosticEventLog.record(category: "cleanup", message: "\(key): cleared")
+            }
+        }
+    }
+
+    private func recordRoutingChange(from previous: OutputRoutingState) {
+        guard previous.phase != outputRouting.phase
+                || previous.error != outputRouting.error
+                || previous.warning != outputRouting.warning
+                || previous.confirmed?.output.uid != outputRouting.confirmed?.output.uid
+                || previous.actualOutput?.uid != outputRouting.actualOutput?.uid else {
+            return
+        }
+        var parts = ["phase=\(outputRouting.phase.diagnosticDescription)"]
+        if let output = outputRouting.confirmed?.output {
+            parts.append("confirmed=\(output.uid)")
+        }
+        if let output = outputRouting.actualOutput {
+            parts.append("actual=\(output.uid)")
+        }
+        if let error = outputRouting.error {
+            parts.append("error=\(error)")
+        }
+        if let warning = outputRouting.warning {
+            parts.append("warning=\(warning)")
+        }
+        diagnosticEventLog.record(category: "routing", message: parts.joined(separator: " | "))
     }
 
     /// 蓝牙重连可能瞬间改写默认输出。监听 HAL 通知后立即纠正，不能只等两秒轮询。
@@ -371,7 +440,7 @@ final class AppModel: ObservableObject {
                 if outputRouting.phase == .failed {
                     pendingApplicationReapplies.removeAll()
                     for key in Array(mixStates.keys) where mixStates[key]?.managed == true && mixStates[key]?.failure == nil {
-                        mixStates[key]?.markOutputChanged()
+                        markApplicationOutputChanged(for: key)
                     }
                 }
             }
@@ -1048,8 +1117,17 @@ final class AppModel: ObservableObject {
         }
         // 已确认路由是唯一可启动目标；未经确认的旧 UID 绝不能继续重放。
         if mode == .mixing, state.managed, state.boundOutputUID != output.uid {
+            guard state.failure != ApplicationMixFailure.outputChanged.message else {
+                mixStates[app.id] = state
+                stop(app.id)
+                return
+            }
             state.markOutputChanged()
-            mixStates[app.id] = state; stop(app.id); return
+            mixStates[app.id] = state
+            diagnosticEventLog.record(category: "applicationFailure",
+                                      message: "\(app.id): \(ApplicationMixFailure.outputChanged.message)")
+            stop(app.id)
+            return
         }
         guard !isFineTuneRunning else {
             mixStates[app.id]?.blockForFineTune()
@@ -1084,11 +1162,17 @@ final class AppModel: ObservableObject {
                     try session.switchOutput(to: output, playbackRoute: expectedPlaybackRoute)
                 }
                 try session.checkHealth(expectingAudio: app.isRunningOutput)
+                // 完整健康读回表示这次等待已经结束；下一次过渡必须从新的时间起算。
+                sessionRouteWaitSince.removeValue(forKey: app.id)
             } catch {
                 recordSessionFailure(error, for: app.id)
-                // 应用路由传播可能晚于 HAL；此时保留已静音的 tap 继续重试，
-                // 直接 stop 会重新暴露原声，反而制造短暂漏音。
-                if error is ApplicationRoutePending { return }
+                // 普通传播等待仍可保留原重放端，但 PCM 已变时必须停掉旧格式并重建。
+                // 超时锁存的失败也要当轮暂停，不能再多播放一个轮询周期。
+                // mixing 始终保留静音 tap；只读计量可以释放，随后沿同一目标重新创建。
+                if let pending = error as? ApplicationRoutePending,
+                   pending.reason != .formatChange, mixStates[app.id]?.failure == nil {
+                    return
+                }
                 if session.mode == .mixing {
                     _ = preserveMixingSession(app.id)
                 } else {
@@ -1169,6 +1253,8 @@ final class AppModel: ObservableObject {
     private func requestOutput(_ intent: OutputRoutingIntent) {
         // 新的设备选择取代先前尚未完成的 APP 恢复操作，不能在另一路由上偷偷清除权限错误。
         pendingApplicationReapplies.removeAll()
+        diagnosticEventLog.record(category: "routingRequest",
+                                  message: intent.memberUIDs.joined(separator: ", "))
         routing.request(intent, at: routingNow)
         refresh()
     }
@@ -1443,7 +1529,15 @@ final class AppModel: ObservableObject {
         guard mixStates[key]?.failure != message else { return }
         // 只记录本机错误元数据，不记录音频。下次可直接读取确切失败，不再只靠截图中的红点猜测。
         Self.audioLog.error("Application \(key, privacy: .public) processing failed: \(message, privacy: .public)")
+        diagnosticEventLog.record(category: "applicationFailure", message: "\(key): \(message)")
         mixStates[key]?.fail(message)
+    }
+
+    private func markApplicationOutputChanged(for key: String) {
+        guard mixStates[key]?.failure != ApplicationMixFailure.outputChanged.message else { return }
+        diagnosticEventLog.record(category: "applicationFailure",
+                                  message: "\(key): \(ApplicationMixFailure.outputChanged.message)")
+        mixStates[key]?.markOutputChanged()
     }
 
     private func recordSessionFailure(_ error: Error, for key: String) {

@@ -679,6 +679,128 @@ struct OutputRoutingIntegrationTests {
         #expect(model.shutdown())
     }
 
+    /// 两次短暂路由等待之间已恢复健康时，第二次必须拥有自己的完整确认窗口。
+    @Test func recoveredSessionStartsANewRouteWaitDeadline() throws {
+        let hardware = RoutingTestHardware()
+        let audio = SessionFixture()
+        let model = AppModel(outputHardware: hardware.hardware, startsMonitoring: false,
+                             applicationAudio: audio.environment)
+        model.setApplicationGain(0.3, for: audio.row.id)
+        let session = try #require(audio.sessions.last)
+        audio.healthError = ApplicationRoutePending()
+        model.refresh()
+        audio.now = audio.now.addingTimeInterval(1)
+        audio.healthError = nil
+        model.refresh()
+
+        audio.now = audio.now.addingTimeInterval(10)
+        audio.healthError = ApplicationRoutePending()
+        model.refresh()
+        #expect(model.mixStates[audio.row.id]?.failure == nil)
+        #expect(session.isActive)
+        #expect(session.stopCount == 0)
+        #expect(model.shutdown())
+    }
+
+    /// 原生 PCM 格式已经变化时不能继续用旧重放链等待；保留 tap 后重建同一目标。
+    @Test func nativeFormatChangeSuspendsReplayAndRebuildsTheSameTap() throws {
+        let hardware = RoutingTestHardware()
+        let audio = SessionFixture()
+        let model = AppModel(outputHardware: hardware.hardware, startsMonitoring: false,
+                             applicationAudio: audio.environment)
+        model.setApplicationGain(0.3, for: audio.row.id)
+        model.toggleApplicationMute(audio.row.id)
+        let session = try #require(audio.sessions.last)
+        audio.healthError = ApplicationRoutePending(reason: .formatChange)
+        model.refresh()
+        #expect(session.isSuspendedForOutputChange)
+        #expect(!session.isActive)
+        #expect(session.stopCount == 0)
+        #expect(model.mixStates[audio.row.id]?.failure == nil)
+
+        audio.healthError = nil
+        model.refresh()
+        #expect(model.sessions[audio.row.id] === session)
+        #expect(session.switchCount == 1)
+        #expect(session.isActive)
+        #expect(session.muted)
+        #expect(session.gain == 0.3)
+        #expect(session.stopCount == 0)
+        #expect(model.shutdown())
+    }
+
+    /// 重建后仍未收敛不能刷新截止时间，否则格式过渡会无限重试。
+    @Test func persistentFormatChangeStillTimesOutAndKeepsMuteUntilExplicitRetry() throws {
+        let hardware = RoutingTestHardware()
+        let audio = SessionFixture()
+        let model = AppModel(outputHardware: hardware.hardware, startsMonitoring: false,
+                             applicationAudio: audio.environment)
+        model.setApplicationGain(0.3, for: audio.row.id)
+        let session = try #require(audio.sessions.last)
+        audio.healthError = ApplicationRoutePending(reason: .formatChange)
+        model.refresh()
+        audio.now = audio.now.addingTimeInterval(4)
+        model.refresh()
+        #expect(model.mixStates[audio.row.id]?.failure == "应用捕获与输出的音频格式尚未一致，请重新应用")
+        #expect(session.isSuspendedForOutputChange)
+        #expect(!session.isActive)
+        #expect(session.stopCount == 0)
+        let switches = session.switchCount
+        audio.healthError = nil
+        model.refresh()
+        #expect(session.switchCount == switches)
+        #expect(!session.isActive)
+        model.applyApplication(audio.row.id)
+        #expect(model.sessions[audio.row.id] === session)
+        #expect(model.mixStates[audio.row.id]?.failure == nil)
+        #expect(session.isActive)
+        #expect(session.stopCount == 0)
+        #expect(model.shutdown())
+    }
+
+    /// 电平模式不静音来源，格式改变后可以释放旧会话，但不能意外变成音量管理。
+    @Test func meteringFormatChangeRecreatesOnlyTheReadOnlyMeter() throws {
+        let hardware = RoutingTestHardware()
+        let audio = SessionFixture()
+        let model = AppModel(outputHardware: hardware.hardware, startsMonitoring: false,
+                             applicationAudio: audio.environment)
+        model.setMeteringVisible(true, for: .popover)
+        let session = try #require(audio.sessions.last)
+        #expect(session.mode == .metering)
+        audio.healthError = ApplicationRoutePending(reason: .formatChange)
+        model.refresh()
+        #expect(session.isReleased)
+        #expect(model.sessions[audio.row.id] == nil)
+        #expect(model.mixStates[audio.row.id]?.failure == nil)
+        audio.healthError = nil
+        model.refresh()
+        let replacement = try #require(audio.sessions.last)
+        #expect(replacement !== session)
+        #expect(replacement.mode == .metering)
+        #expect(replacement.isActive)
+        #expect(model.mixStates[audio.row.id]?.managed == false)
+        #expect(model.shutdown())
+    }
+
+    /// 超时之后当轮就必须停止重放，而不是锁存失败后再多播放一个轮询周期。
+    @Test func timedOutRouteWaitStopsReplayImmediatelyWithoutReleasingMuteTap() throws {
+        let hardware = RoutingTestHardware()
+        let audio = SessionFixture()
+        let model = AppModel(outputHardware: hardware.hardware, startsMonitoring: false,
+                             applicationAudio: audio.environment)
+        model.setApplicationGain(0.3, for: audio.row.id)
+        let session = try #require(audio.sessions.last)
+        audio.healthError = ApplicationRoutePending()
+        model.refresh()
+        audio.now = audio.now.addingTimeInterval(4)
+        model.refresh()
+        #expect(model.mixStates[audio.row.id]?.failure != nil)
+        #expect(!session.isActive)
+        #expect(session.isSuspendedForOutputChange)
+        #expect(session.stopCount == 0)
+        #expect(model.shutdown())
+    }
+
     @Test func effectOnlyMixingTapSurvivesHealthFailureWithoutVolumeManagement() throws {
         let hardware = RoutingTestHardware()
         let audio = SessionFixture()

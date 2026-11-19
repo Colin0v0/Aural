@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 import AuralCore
 import ServiceManagement
@@ -16,6 +17,7 @@ struct SettingsView: View {
     @ObservedObject private var updates = AuralUpdateChecker.shared
     @StateObject private var loginItem = LoginItemState()
     @StateObject private var updateCheckHover = PanelRowHoverState()
+    @StateObject private var repositoryLinkHover = PanelRowHoverState()
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
@@ -23,6 +25,7 @@ struct SettingsView: View {
             header
             generalCard
             featuresCard
+            diagnosticsCard
             Spacer(minLength: 0)
             footer
         }
@@ -134,38 +137,99 @@ struct SettingsView: View {
 
     private var footer: some View {
         HStack {
-            Text("Aural \(AuralVersion.current)")
+            if let url = AuralProjectLinks.repositoryURL {
+                Button {
+                    NSWorkspace.shared.open(url)
+                } label: {
+                    Text("Aural \(AuralVersion.current)")
+                }
+                .buttonStyle(.plain)
                 .font(PanelStyle.captionFont)
-                .foregroundStyle(PanelStyle.secondary)
-            Spacer()
-            if updates.availableUpdate != nil {
-                AuralUpdateCapsule(updates: updates, settings: settings, presentation: .text)
-            } else if updates.didCheckWithoutUpdate {
-                Text(settings.localized("未发现新版本"))
+                .foregroundStyle(repositoryLinkHover.active ? PanelStyle.ink : PanelStyle.secondary)
+                .onHover { repositoryLinkHover.active = $0 }
+                .help(settings.localized("打开 GitHub 项目主页"))
+            } else {
+                Text("Aural \(AuralVersion.current)")
                     .font(PanelStyle.captionFont)
                     .foregroundStyle(PanelStyle.secondary)
-            } else if let error = updates.lastError {
-                Button(settings.localized("检查失败，重试")) {
-                    updates.check(force: true)
-                }
-                .buttonStyle(.plain)
-                .font(PanelStyle.captionFont)
-                .foregroundStyle(PanelStyle.error)
-                .disabled(updates.isChecking)
-                .help(error)
-            } else {
-                Button(settings.localized(updates.isChecking ? "正在检查更新…" : "检查更新")) {
-                    updates.check(force: true)
-                }
-                .buttonStyle(.plain)
-                .font(PanelStyle.captionFont)
-                // 只变文字颜色，不增加悬停底板；检查中不呈现可点击的高亮。
-                .foregroundStyle(updateCheckHover.active && !updates.isChecking
-                                 ? PanelStyle.ink : PanelStyle.secondary)
-                .onHover { updateCheckHover.active = $0 }
-                .disabled(updates.isChecking)
             }
+            Spacer()
+            updateControl
         }
+    }
+
+    @ViewBuilder private var updateControl: some View {
+        if updates.availableUpdate != nil {
+            AuralUpdateCapsule(updates: updates, settings: settings, presentation: .text)
+        } else if updates.didCheckWithoutUpdate {
+            Text(settings.localized("未发现新版本"))
+                .font(PanelStyle.captionFont)
+                .foregroundStyle(PanelStyle.secondary)
+        } else if let error = updates.lastError {
+            Button(settings.localized("检查失败，重试")) {
+                updates.check(force: true)
+            }
+            .buttonStyle(.plain)
+            .font(PanelStyle.captionFont)
+            .foregroundStyle(PanelStyle.error)
+            .disabled(updates.isChecking)
+            .help(error)
+        } else {
+            Button(settings.localized(updates.isChecking ? "正在检查更新…" : "检查更新")) {
+                updates.check(force: true)
+            }
+            .buttonStyle(.plain)
+            .font(PanelStyle.captionFont)
+            // 只变文字颜色，不增加悬停底板；检查中不呈现可点击的高亮。
+            .foregroundStyle(updateCheckHover.active && !updates.isChecking
+                             ? PanelStyle.ink : PanelStyle.secondary)
+            .onHover { updateCheckHover.active = $0 }
+            .disabled(updates.isChecking)
+        }
+    }
+
+    private var diagnosticsCard: some View {
+        SettingsCard(title: settings.localized("诊断")) {
+            HStack(alignment: .center, spacing: 16) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(settings.localized("错误日志"))
+                        .font(PanelStyle.bodyFont)
+                    Text(settings.localized("导出音频状态与错误日志。"))
+                        .font(PanelStyle.captionFont)
+                        .foregroundStyle(PanelStyle.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: 12)
+                Button(settings.localized("导出诊断报告…")) {
+                    exportDiagnostics()
+                }
+                .buttonStyle(PanelButtonStyle(prominent: true))
+            }
+            .padding(.vertical, 8)
+            .frame(minHeight: 52)
+        }
+    }
+
+    private func exportDiagnostics() {
+        let report = model.makeDiagnosticReport()
+        do {
+            guard let url = try AuralDiagnosticExporter.save(report) else { return }
+            // 只记录导出路径的本地文件名，不把用户目录写进下一次诊断报告。
+            model.diagnosticEventLog.record(category: "diagnostics",
+                                            message: "saved \(url.lastPathComponent)")
+        } catch {
+            model.diagnosticEventLog.record(category: "diagnostics",
+                                            message: "export failed: \(error.localizedDescription)")
+            presentDiagnosticError(settings.localized("无法导出诊断报告"), error.localizedDescription)
+        }
+    }
+
+    private func presentDiagnosticError(_ title: String, _ detail: String) {
+        let alert = NSAlert()
+        alert.messageText = title
+        alert.informativeText = detail
+        alert.addButton(withTitle: settings.localized("好"))
+        alert.runModal()
     }
 
     private var simultaneousOutputBinding: Binding<Bool> {
@@ -218,8 +282,8 @@ enum SettingsMetrics {
     // 分组标题、设置项与分隔线共用窗口留白，内层不再叠加缩进。
     static let horizontalInset: CGFloat = 18
     static let width: CGFloat = 500
-    // 新增应用音效总开关后按真实内容增高，避免固定窗口裁掉最后一行。
-    static let height: CGFloat = 572
+    // 新增诊断分组后按真实内容增高，避免固定窗口裁掉最后一行。
+    static let height: CGFloat = 660
     static let controlWidth: CGFloat = 238
     static let booleanControlWidth: CGFloat = 116
     static let rowHeight: CGFloat = 40

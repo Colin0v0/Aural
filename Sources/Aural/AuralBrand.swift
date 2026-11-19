@@ -1,6 +1,20 @@
 import AppKit
 import SwiftUI
 
+/// GitHub 地址来自构建时注入的更新仓库身份，不在源码里复制账号名。
+enum AuralProjectLinks {
+    static var repositoryURL: URL? {
+        repositoryURL(repository: Bundle.main.object(
+            forInfoDictionaryKey: "AuralUpdateRepository"
+        ) as? String)
+    }
+
+    static func repositoryURL(repository: String?) -> URL? {
+        guard let repository, !repository.isEmpty else { return nil }
+        return URL(string: "https://github.com/\(repository)")
+    }
+}
+
 /// 这个类型只用于取得当前代码实际所在的 bundle。
 /// 主程序与 SwiftPM 测试宿主会分别提供 `.app` 和 `.xctest` 资源目录。
 private final class AuralBrandBundleToken {}
