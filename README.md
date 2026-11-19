@@ -1,148 +1,133 @@
 <p align="center">
-  <img src="Resources/AppIcon-1024.png" width="128" height="128" alt="Aural app icon" />
+  <img src="Resources/AppIcon-1024.png" width="96" height="96" alt="Aural app icon" />
 </p>
-
 <h1 align="center">Aural</h1>
-
 <p align="center"><strong>Your Mac. Your Sound. Your Rules.</strong></p>
-
+<p align="center">Per-app volume, audio routing, and headphone controls. Right in your menu bar.</p>
+<p align="center"><strong>English</strong> · <a href="README.zh-CN.md">简体中文</a></p>
 <p align="center">
-  <strong>English</strong> · <a href="README.zh-CN.md">简体中文</a>
-</p>
-
-<p align="center">
-  <img src="https://img.shields.io/badge/macOS-15.4%2B-000000?logo=apple&logoColor=white" alt="macOS 15.4 or later" />
+  <a href="https://github.com/Colin0v0/Aural/releases/latest"><img src="https://img.shields.io/github/v/release/Colin0v0/Aural" alt="Latest release" /></a>
+  <img src="https://img.shields.io/badge/macOS-15.4%2B-000000?logo=apple&amp;logoColor=white" alt="macOS 15.4 or later" />
+  <img src="https://img.shields.io/badge/Apple_Silicon-arm64-555555" alt="Apple Silicon arm64" />
+  <a href="https://github.com/Colin0v0/Aural/actions/workflows/release.yml"><img src="https://github.com/Colin0v0/Aural/actions/workflows/release.yml/badge.svg?branch=main" alt="Release checks" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue" alt="MIT License" /></a>
 </p>
+<p align="center">
+  <a href="https://github.com/Colin0v0/Aural/releases/latest"><strong>Download for Apple Silicon</strong></a> ·
+  <a href="#compatibility--installation">Before you install</a> ·
+  <a href="docs/CHANGELOG.md">What's changed</a>
+</p>
+<p align="center">
+  <a href="docs/images/hero-en.png"><img src="docs/images/hero-en.png" width="440" alt="Aural output panel with speaker and headphone controls, independent Chrome and Music volumes, and per-app route buttons" /></a>
+</p>
+<p align="center"><sub>UI previews use sample devices and apps rendered by Aural 0.3.9, not a live audio session. <a href="docs/images/README.md">Image sources</a>.</sub></p>
+
+> Free and open source. No account required. Current downloads are ad-hoc signed and **not notarized by Apple**; macOS may block launch. [Distribution details](docs/TRUST_AND_TESTING.md#distribution-and-permissions).
+
+## Why Aural?
+
+**Turn down your browser without turning down your music.** Aural puts separate app volumes and output choices in one menu bar panel, so you don't have to keep opening player controls or macOS Sound settings.
+
+Start with volume and mute. Enable multi-device output, effects, or headphone controls in Settings when you need them; these features are off by default.
+
+## Core features
+
+<table>
+<tr>
+<td width="50%" valign="top">
+<h3>Mix apps independently</h3>
+<p>Give Chrome and Music different volumes, mute either app, and see live levels while the panel is open.</p>
+<a href="docs/images/mixer-en.png"><img src="docs/images/mixer-en.png" width="440" alt="Separate Chrome and Music volume sliders with effects and routing buttons" /></a>
+</td>
+<td width="50%" valign="top">
+<h3>Choose more than one output</h3>
+<p>Build a speaker-and-headphone group, keep individual device controls, and choose a different subset for each app.</p>
+<a href="docs/images/outputs-en.png"><img src="docs/images/outputs-en.png" width="440" alt="Multi-device output editor with speakers and AirPods Pro selected" /></a>
+</td>
+</tr>
+<tr>
+<td width="50%" valign="top">
+<h3>Shape each app's sound</h3>
+<p>A 10-band EQ, spatial effects, volume leveling, and channel controls. Save presets and compare with the original.</p>
+<a href="docs/images/effects-en.png"><img src="docs/images/effects-en.png" width="440" alt="Music effects window showing the ten-band equalizer, response preview, and Compare Original control" /></a>
+</td>
+<td width="50%" valign="top">
+<h3>Keep headphone controls nearby</h3>
+<p>Check battery levels and change the listening modes your exact model exposes. Controls vary by device and firmware.</p>
+<a href="docs/images/headphones-en.png"><img src="docs/images/headphones-en.png" width="440" alt="Example headphone battery readings with noise cancellation, transparency, and adaptive controls" /></a>
+</td>
+</tr>
+</table>
+
+## How it works
+
+Browser audio on the speakers. Music on the headphones. With both devices connected:
 
 <p align="center">
-  <a href="https://github.com/Colin0v0/Aural/releases"><strong>Download the latest release</strong></a>
-  ·
-  <a href="docs/HEADPHONE_COMPATIBILITY.md">Headphone compatibility</a>
+  <img src="docs/images/routing-en.svg" width="820" alt="Routing example: Chrome passes through Aural to speakers; Music passes through Aural to headphones. Both devices belong to the same output group." />
 </p>
 
-Aural keeps your Mac’s sound close at hand, right from the menu bar. Switch
-devices, give each app the level it needs, send audio to more than one place,
-and check on your headphones. Open an app’s Effects window when you want to
-shape its sound.
+1. In Settings, enable **Show Multi-Device Output**.
+2. Add your speakers and headphones to the output group.
+3. Start playback in both apps. In each app's route menu, choose a custom output: speakers for Chrome, headphones for Music.
 
-> **Current release: 0.3.8**
->
-> Aural is distributed directly and is not notarized yet. macOS may ask you to
-> confirm the first launch.
+An app can also use **All Outputs** to follow the whole group. Per-app choices apply within the current group, not to arbitrary disconnected devices. The illustration shows the intended configuration, not a hardware test result.
 
-## What you can do
+> **Custom routing is not system-wide privacy isolation.** In 0.3.9, when all selected targets are unavailable, Aural pauses that app’s replay and retains mute capture instead of using other group outputs. The player’s timeline is not paused. This does not cover quitting Aural, permission revocation, or every hardware transition. Older releases such as 0.3.8 may use other group outputs. [Behavior and limits](docs/TRUST_AND_TESTING.md#known-limits).
 
-- **Switch audio quickly** — choose your output or microphone from the menu bar.
-- **Mix apps independently** — give each playing app its own volume, mute state,
-  and live level meter.
-- **Use multiple outputs** — send system audio to more than one speaker or
-  headphone at the same time.
-- **Route apps separately** — keep music on your headphones while browser audio
-  stays on your speakers.
-- **Shape app sound** — open a dedicated window with a 10-band EQ fader bank,
-  response preview, custom presets, and Compare Original without changing the
-  app’s volume or output route.
-- **Control headphones** — check battery, switch noise modes, and manage
-  multiple headphones in one place.
-- **Make it yours** — use English or Chinese, follow the system appearance, and
-  enable only the features you need.
+## Compatibility / installation
 
-App effects, headphone controls, and multi-device output are off by default.
-Turn on what you need in Settings.
+| Check | Current scope |
+| --- | --- |
+| Mac | Apple Silicon, macOS **15.4 or later**. Intel release builds are not provided. |
+| Headphones | Selected models from **Apple / Beats, Bowers & Wilkins, Sony, OPPO, Bose, and Sennheiser**. Brand recognition does not mean every model is supported. |
+| Evidence | Many listed models are **upstream verified** or **experimental**, not independently verified in Aural. See the [model-by-model matrix](docs/HEADPHONE_COMPATIBILITY.md). |
+| Permissions | System audio recording for app processing; Bluetooth for headphone controls. The microphone page controls hardware settings, not microphone recording. |
 
-## Multiple outputs, per-app routing
+### Install
 
-When you enable **Show Multi-Device Output**, choose two or more outputs and
-Aural treats them as one group. Each device keeps its own volume and mute
-controls.
+1. Download the arm64 DMG from [GitHub Releases](https://github.com/Colin0v0/Aural/releases/latest).
+2. Open it and drag Aural into **Applications**. Quit an older running copy before replacing it.
+3. Launch Aural and follow the system permission prompts. The current startup flow requires system audio recording access to enter the main interface.
+4. Play audio in an app, then open Aural from the menu bar. Optional features are in Settings.
 
-Each playing app can use:
+Release assets include SHA-256 files. Current builds are ad-hoc signed, without Developer ID signing or Apple notarization. Follow macOS security prompts; this project does not ask you to disable Gatekeeper or SIP.
 
-- **All Outputs** — follow the whole group, including devices added later.
-- **Custom output** — play only through the devices you select.
+### Before relying on it
 
-Changing one app’s route does not change other apps or the system output.
-Aural remembers custom routes across device disconnects and restores them when
-the device returns.
+- Switching outputs can cause a brief audio gap. Bluetooth devices can have different latency; multi-device output is not a promise of synchronized playback.
+- Sleep, disconnects, or processing errors can require **Reapply**. Test reconnect behavior at a low device volume before using a setup in public.
+- Protected audio, third-party aggregates, and some duplex or multi-stream interfaces are not supported by per-app processing. The current PCM path supports native Float32 mono or stereo.
+- Automated tests cover state transitions and synthetic audio, **not every physical device, long-running session, or real-world leak scenario**. [Testing scope and hardware checklist](docs/TRUST_AND_TESTING.md).
 
-## App effects
+## Technical details
 
-Open an app’s Effects window from its row in Aural. Start with one of six
-built-in presets, save the current setup as your own, or use the ten faders to
-shape the sound. Rename or delete a custom preset from the toolbar while it is
-selected, and use Compare Original for a quick listen before and after.
+### Local audio, explicit diagnostics
 
-Effects are remembered per app. Volume, mute, and output routing stay as they
-were. Turn the feature on in Settings.
+Audio processing stays on your Mac. Aural does not save recordings, upload audio, require an account, or collect telemetry. It contacts GitHub to check for updates and download releases.
 
-## Supported headphones
+When something goes wrong, use **Settings → Diagnostics → Export Diagnostics…**. The JSON report stays local until you share it. It contains current audio state and recent in-memory events, not audio samples. Device names, UIDs, Bluetooth addresses, and application identities can be included; review the file before posting it publicly.
 
-Aural shows controls only when the connected headphones provide them. What you
-see can vary by model, firmware, and macOS version.
+### Build and inspect
 
-| Headphones | What Aural can do | Evidence |
-| --- | --- | --- |
-| Bowers & Wilkins Px7 S3 / Px8 | Battery, Off, cancellation, transparency | Upstream verified |
-| Bowers & Wilkins Px7 S2 / Pi5 / Pi6 / Pi7 / Pi8 | Battery, Off, cancellation, transparency | Experimental |
-| Sony WH-1000XM3 | Battery, Off, cancellation, transparency, optional wind reduction | Upstream verified |
-| Sony WH-1000XM5 / ULT WEAR | Battery, Off, cancellation, transparency | Upstream verified |
-| Sony WH-1000XM2 / XM4 / XM6, WH-CH720N, WF-1000XM3 / XM4 / XM5 / XM6, LinkBuds S, WF-SP800N, WI-SP600N, MDR-1000X | Controls only after the matching Sony V1 or V2 service is confirmed | Experimental |
-| OPPO Enco Air5s | Battery and noise modes | Upstream verified |
-| AirPods / Beats, including AirPods Max | Off plus the listening modes exposed by macOS, including adaptive when available | System-dependent |
-| Bose QuietComfort Ultra Headphones (2nd Gen) / QuietComfort Headphones | Battery, Quiet, and Aware | Upstream verified |
-| Bose QuietComfort Ultra Earbuds (2nd Gen) | Left, right, and case battery; Quiet and Aware | Upstream verified |
-| Bose QuietComfort 45 | Battery, Quiet, and Aware after product initialization | Experimental |
-| Sennheiser ACCENTUM Wireless | Battery, Off, cancellation, transparency | Upstream verified |
-
-**Upstream verified** means the exact model was tested by the upstream protocol
-project; Aural still needs independent hardware acceptance. **Experimental**
-means the model is recognized, but the exact hardware has not been validated in
-the current build.
-
-See [Headphone compatibility](docs/HEADPHONE_COMPATIBILITY.md) for the full
-evidence matrix, research backlog, and community test-report checklist.
-
-## Install
-
-1. Download the latest build from [GitHub Releases](https://github.com/Colin0v0/Aural/releases).
-2. Open the DMG and drag Aural into Applications.
-3. Launch Aural and allow Bluetooth or app-audio permissions when prompted.
-
-Aural targets **macOS 15.4 or later on Apple Silicon**.
-
-## Good to know
-
-- Some headphones expose only part of their controls, and firmware updates can
-  change compatibility.
-- Output switching can produce a short audio gap.
-- Multiple Bluetooth headphones may have different latency.
-- Sleep, disconnects, or audio errors can require an app to be applied again.
-- Protected audio and some app-specific audio setups may not be supported.
-
-## Privacy
-
-Aural processes audio locally. It does not save recordings, upload your audio,
-require an account, or collect telemetry.
-
-Diagnostics may include device names, IDs, or Bluetooth addresses. Remove
-anything private before sharing diagnostic output.
-
-## Build from source
-
-Requirements: Swift 6 toolchain and macOS 15.4 or later.
+Requires a Swift 6 toolchain and macOS 15.4 or later:
 
 ```sh
+git clone https://github.com/Colin0v0/Aural.git
+cd Aural
 ./Scripts/check.sh
 open dist/Aural.app
 ```
 
-The script runs tests, builds the app, verifies the local signature, and creates
-`dist/Aural.app`.
+`check.sh` runs tests, builds the app, checks the local signature, and reads output/input diagnostics on the host Mac. Hardware-independent release checks run in [GitHub Actions](https://github.com/Colin0v0/Aural/actions/workflows/release.yml). A green build is evidence of those checks, not Apple certification or complete hardware acceptance.
 
-See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for credits and
-[docs/CHANGELOG.md](docs/CHANGELOG.md) for release history.
+| Read more | |
+| --- | --- |
+| [Trust, limits, and testing](docs/TRUST_AND_TESTING.md) | Known risks, validation scope, and reporting a reproducible problem |
+| [Headphone compatibility](docs/HEADPHONE_COMPATIBILITY.md) | Exact models, protocol evidence, and experimental support |
+| [Development and diagnostics](docs/DEVELOPMENT.md) | Source structure, commands, and local builds |
+| [Audio permission implementation](docs/audio-capture-permission.md) | Permission handling and its non-public API dependency |
+| [Release checklist](docs/RELEASING.md) · [Changelog](docs/CHANGELOG.md) | Packaging requirements and the fixes shipped in each version |
+| [Third-party notices](THIRD_PARTY_NOTICES.md) · [MIT License](LICENSE) | Code origins and license terms |
 
-## License
-
-Aural is released under the [MIT License](LICENSE).
+Found a problem? [Open an issue](https://github.com/Colin0v0/Aural/issues/new?template=bug_report.yml) with your version, exact devices, and steps to reproduce. Attach a diagnostic report only after removing private information. For the UI previews above, see the [reproducible image sources](docs/images/README.md).

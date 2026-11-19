@@ -45,13 +45,13 @@ struct AppAudioRouteTests {
         #expect(result.effective == .custom(deviceUIDs: ["speaker"]))
     }
 
-    @Test func customRoutePrunesOnlyDevicesRemovedFromTheGroup() {
+    @Test func customRouteRetainsDevicesRemovedFromTheGroup() {
         let result = AppAudioRouteResolver.resolve(
             stored: .custom(deviceUIDs: ["speaker", "headphone", "usb"]),
             configuredDeviceUIDs: ["headphone", "usb"],
             activeDeviceUIDs: ["headphone", "usb"]
         )
-        #expect(result.persisted == .custom(deviceUIDs: ["headphone", "usb"]))
+        #expect(result.persisted == .custom(deviceUIDs: ["speaker", "headphone", "usb"]))
         #expect(result.effective == .custom(deviceUIDs: ["headphone", "usb"]))
     }
 
@@ -62,7 +62,7 @@ struct AppAudioRouteTests {
             activeDeviceUIDs: ["speaker"]
         )
         #expect(disconnected.persisted == .custom(deviceUIDs: ["headphone"]))
-        #expect(disconnected.effective == .allOutputs)
+        #expect(disconnected.effective == .waitingForDevices)
         #expect(disconnected.unavailableDeviceUIDs == ["headphone"])
 
         let reconnected = AppAudioRouteResolver.resolve(
@@ -75,14 +75,14 @@ struct AppAudioRouteTests {
         #expect(reconnected.unavailableDeviceUIDs.isEmpty)
     }
 
-    @Test func customRouteWithNoEffectiveDeviceUsesAllOutputsWithoutLosingIntent() {
+    @Test func customRouteWithNoEffectiveDeviceWaitsWithoutLosingIntent() {
         let result = AppAudioRouteResolver.resolve(
             stored: .custom(deviceUIDs: ["headphone", "usb"]),
             configuredDeviceUIDs: ["speaker", "headphone", "usb"],
             activeDeviceUIDs: ["speaker"]
         )
         #expect(result.persisted == .custom(deviceUIDs: ["headphone", "usb"]))
-        #expect(result.effective == .allOutputs)
+        #expect(result.effective == .waitingForDevices)
         #expect(result.unavailableDeviceUIDs == ["headphone", "usb"])
     }
 
@@ -95,4 +95,13 @@ struct AppAudioRouteTests {
         #expect(result.persisted == .custom(deviceUIDs: ["speaker", "headphone"]))
         #expect(result.effective == .custom(deviceUIDs: ["speaker", "headphone"]))
     }
+    @Test func removingEveryCustomTargetWaitsWithoutExpandingTheSelection() {
+        let saved = AppAudioRoute.custom(deviceUIDs: ["headphone"])
+        let result = AppAudioRouteResolver.resolve(stored: saved,
+            configuredDeviceUIDs: ["speaker", "usb"], activeDeviceUIDs: ["speaker", "usb"])
+        #expect(result.persisted == saved)
+        #expect(result.effective == .waitingForDevices)
+        #expect(result.unavailableDeviceUIDs == ["headphone"])
+    }
+
 }

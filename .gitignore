@@ -30,10 +30,20 @@ xcuserdata/
 *.swp
 *~
 
-# 内部开发记录保留本地；仓库文档只发布更新日志。
+# 内部开发记录保留本地；公开产品文档与配图逐项列入白名单。
 /implement-stage/
 /docs/*
 !/docs/CHANGELOG.md
 !/docs/HEADPHONE_COMPATIBILITY.md
 !/docs/releases/
 !/docs/releases/*.md
+
+!/docs/TRUST_AND_TESTING.md
+!/docs/DEVELOPMENT.md
+!/docs/RELEASING.md
+!/docs/audio-capture-permission.md
+!/docs/images/
+/docs/images/*
+!/docs/images/README.md
+!/docs/images/*.png
+!/docs/images/*.svg

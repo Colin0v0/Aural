@@ -81,6 +81,7 @@ struct ApplicationVolumeSection: View {
                             },
                             routingEnabled: routingEnabled,
                             audioRoute: model.applicationAudioRoute(for: app.id),
+                            routePaused: model.applicationRoutePlaybackPaused(for: app.id),
                             routeOutputs: model.availableApplicationRouteOutputs,
                             setAudioRoute: { model.setApplicationAudioRoute($0, for: app.id) },
                             toggleRouteOutput: { model.toggleApplicationAudioRouteDevice($0, for: app.id) })
@@ -94,15 +95,16 @@ struct ApplicationVolumeSection: View {
         }
         if state.failure != nil { return L10n.text("未应用；请从选项中重新应用", language: language) }
         if model.processError != nil { return L10n.text("音频状态不可用", language: language) }
+        if model.effectiveApplicationAudioRoute(for: app.id).isWaitingForDevices {
+            return L10n.text(model.applicationRoutePlaybackPaused(for: app.id)
+                             ? "所选输出不可用，已暂停播放" : "所选输出当前不可用", language: language)
+        }
         if let session = model.sessions[app.id], session.isActive {
             if model.effectiveApplicationAudioEffect(for: app.id) != nil {
                 return L10n.text("已启用应用音效", language: language)
             }
             if model.effectiveApplicationAudioRoute(for: app.id).isCustom {
                 return L10n.text("已应用自定义路由", language: language)
-            }
-            if model.applicationAudioRoute(for: app.id).isCustom {
-                return L10n.text("自定义路由暂不可用，当前按全部输出播放", language: language)
             }
             return L10n.text(session.mode == .mixing ? "已应用音量配置" : "正在读取实时电平",
                              language: language)

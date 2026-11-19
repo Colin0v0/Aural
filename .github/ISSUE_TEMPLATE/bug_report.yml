@@ -1,0 +1,60 @@
+name: Audio bug / 音频问题
+description: Report unexpected playback, mute failures, silence, or stale errors / 反馈外放、静音失效、无声或残留错误
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use low-volume, non-sensitive test audio. Do not upload private recordings or unredacted device addresses.
+        请用低音量、非敏感音频复现。不要上传私人录音或未脱敏的设备地址。
+  - type: dropdown
+    id: symptom
+    attributes:
+      label: What happened? / 问题类型
+      options:
+        - Unexpected speaker playback / 未预期的外放
+        - App mute or zero volume did not hold / 应用静音或零音量失效
+        - Missing or interrupted audio / 无声或断音
+        - Incorrect route, device state, or persistent error / 路由、设备状态或残留错误
+        - Other / 其他
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Aural version / Aural 版本
+      description: Copy the version shown in the panel or diagnostic report. / 填写面板或诊断报告中的实际版本。
+      placeholder: 0.3.9 (36)
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Mac, macOS, and exact devices / Mac、系统与设备
+      description: Include firmware if known; no serial numbers, personal device names, or Bluetooth addresses are needed. / 可附固件版本，无需序列号、私人设备名或蓝牙地址。
+      placeholder: Mac model / macOS version / speaker or headphone model / audio interface
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Starting state and steps / 初始状态与复现步骤
+      description: Include output-group members, per-app targets, app gain/mute, hardware mute, effects, and the trigger (switch, disconnect, sleep, call). / 说明组成员、应用目标、音量与静音、设备静音、音效，以及切换、断连、休眠或通话等触发动作。
+      placeholder: |
+        1. Initial outputs and app state / 初始输出和应用状态
+        2. Action taken / 操作
+        3. Expected result / 预期
+        4. Actual physical output or exact error / 实际发声设备或完整错误
+    validations:
+      required: true
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Optional diagnostics / 可选诊断
+      description: Export Settings → Diagnostics before restarting. Review and redact names, UIDs, addresses, app identities, and protocol traces before attaching JSON. No audio recordings are needed. / 重启前从设置导出诊断，检查并移除私人名称、UID、地址、应用身份及协议记录后再附 JSON，不需要录音。
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: Privacy check / 隐私检查
+      options:
+        - label: I have reviewed any attached data and removed private information. / 如有附件，我已检查并移除私人信息。
+          required: true

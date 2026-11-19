@@ -263,7 +263,7 @@ let auralAudioCallback: AudioDeviceIOProc = { _, _, input, _, output, _, context
 /// 不支持的格式直接拒绝，绝不另建 mixdown/后备输出链路。
 @MainActor
 public final class ProcessAudioSession: ApplicationAudioSession {
-    public let group: AudioProcessGroup
+    public private(set) var group: AudioProcessGroup
     public private(set) var output: AudioOutput
     public let mode: ApplicationAudioMode
     public private(set) var gain: Float = 1
@@ -300,6 +300,50 @@ public final class ProcessAudioSession: ApplicationAudioSession {
         return renderState.peak.consume()
     }
 
+    /// 两种模式始终明确区分：混音来源持续静音，只读电平绝不静音来源。
+    /// 纯描述构建可离线测试，不需要访问 HAL 或猜测可用设备。
+    static func makeTapDescription(group: AudioProcessGroup, route: ApplicationPlaybackRoute,
+                                   mode: ApplicationAudioMode, suspended: Bool) -> CATapDescription {
+        let description = CATapDescription(processes: group.objectIDs, deviceUID: route.tapDeviceUID, stream: 0)
+        description.uuid = UUID()
+        description.name = "Aural application audio"
+        description.isPrivate = true
+        // mutedWhenTapped 在停止读取后会恢复原声；持续静音必须使用 muted。
+        description.muteBehavior = mode == .mixing ? .muted : .unmuted
+        if suspended {
+            description.deviceUID = nil
+            description.stream = nil
+        }
+        return description
+    }
+
+    /// 目标尚不可用时只接管静音，不创建输出聚合，不启动 I/O，不读取或重放任何样本。
+    public func startSuspended() throws {
+        guard mode == .mixing, !group.objectIDs.isEmpty else {
+            throw AudioFailure("只有具有已注册进程的混音会话才能等待所选输出")
+        }
+        guard isReleased else { throw AudioFailure("该应用已接管，不能重复启动") }
+        let description = Self.makeTapDescription(group: group, route: playbackRoute, mode: mode, suspended: true)
+        try HAL.check(AudioHardwareCreateProcessTap(description, &tapID), "创建等待输出的应用静音捕获")
+        tapDescription = description
+        suspendedForOutputChange = true
+    }
+
+    /// 更新同一应用的进程集合，不销毁旧 tap；暂停期间新增的 helper 也必须留在静音范围内。
+    public func updateProcesses(to group: AudioProcessGroup) throws {
+        guard tapID != 0, let current = tapDescription,
+              group.id == self.group.id, group.bundleID == self.group.bundleID,
+              !group.objectIDs.isEmpty else {
+            throw AudioFailure("应用静音捕获的进程身份无效，未改变会话")
+        }
+        let description = Self.makeTapDescription(group: group, route: playbackRoute, mode: mode,
+                                                  suspended: suspendedForOutputChange)
+        description.uuid = current.uuid
+        try AudioHardwareTap(id: tapID).setDescription(description)
+        tapDescription = description
+        self.group = group
+    }
+
     public func start() throws {
         let interval = AudioSwitchTrace.begin("StartApplicationSession")
         defer { AudioSwitchTrace.end("StartApplicationSession", interval) }
@@ -310,14 +354,8 @@ public final class ProcessAudioSession: ApplicationAudioSession {
             try validateRoutes(playbackRoute)
             // 独立输出设备没有输入流，且仅有一个输出流，因此它的全局 stream 索引为 0。
             // 显式限定来源，绝不把进程在其他设备上的声音混到系统默认输出。
-            let description = CATapDescription(processes: group.objectIDs,
-                                               deviceUID: playbackRoute.tapDeviceUID,
-                                               stream: 0)
-            description.uuid = UUID()
-            description.name = "Aural application audio"
-            description.isPrivate = true
-            // 计量不静音来源；混音才由本进程接管并重放音频。
-            description.muteBehavior = mode == .mixing ? .mutedWhenTapped : .unmuted
+            let description = Self.makeTapDescription(group: group, route: playbackRoute,
+                                                       mode: mode, suspended: false)
             try HAL.check(AudioHardwareCreateProcessTap(description, &tapID), "创建应用音频捕获（请检查系统音频录制权限）")
             tapDescription = description
             let format: AudioStreamBasicDescription = try HAL.read(tapID, HAL.address(kAudioTapPropertyFormat), initial: AudioStreamBasicDescription())
@@ -345,12 +383,12 @@ public final class ProcessAudioSession: ApplicationAudioSession {
                 // 已创建的成功 tap 正在静音来源；启动失败时只拆重放端，
                 // 不能为了清理错误把静音一起释放，否则应用会立即恢复原声。
                 var message = failure
-                do { try stopPlaybackAggregate() }
+                do { try suspendForOutputChange() }
                 catch {
-                    message += "；停止失败的重放端时：\(error.localizedDescription)"
+                    suspendedForOutputChange = false
+                    message += "；暂停失败的重放端时：\(error.localizedDescription)"
                 }
-                suspendedForOutputChange = true
-                if error is ApplicationRoutePending { throw error }
+                if error is ApplicationRoutePending, suspendedForOutputChange { throw error }
                 throw AudioFailure(message)
             }
             do { try stop() }
@@ -365,23 +403,16 @@ public final class ProcessAudioSession: ApplicationAudioSession {
     public func suspendForOutputChange() throws {
         let interval = AudioSwitchTrace.begin("SuspendApplicationOutput")
         defer { AudioSwitchTrace.end("SuspendApplicationOutput", interval) }
-        guard started, tapID != 0, let description = tapDescription else {
+        guard mode == .mixing, tapID != 0, let current = tapDescription else {
             throw AudioFailure("应用音频会话尚未启动，不能暂停输出路由")
         }
-        do {
-            try stopPlaybackAggregate()
-            // 解除设备绑定后 tap 跟随进程，不再受系统默认输出切换影响。
-            description.deviceUID = nil
-            description.stream = nil
-            try AudioHardwareTap(id: tapID).setDescription(description)
-            suspendedForOutputChange = true
-        } catch {
-            let failure = error.localizedDescription
-            // 暂停失败也不能销毁 tap：旧输出仍是当前系统输出时，
-            // 保持原静音比“清理成功但漏出原声”更安全。
-            suspendedForOutputChange = true
-            throw AudioFailure(failure)
-        }
+        // 先成功建立无设备绑定的持续静音，再停重放。属性写入失败时不冒充已暂停。
+        let description = Self.makeTapDescription(group: group, route: playbackRoute, mode: mode, suspended: true)
+        description.uuid = current.uuid
+        try AudioHardwareTap(id: tapID).setDescription(description)
+        tapDescription = description
+        try stopPlaybackAggregate()
+        suspendedForOutputChange = true
     }
 
     public func switchOutput(to output: AudioOutput, playbackRoute: ApplicationPlaybackRoute) throws {
@@ -425,27 +456,15 @@ public final class ProcessAudioSession: ApplicationAudioSession {
             started = true
         } catch {
             let failure = error.localizedDescription
-            if let pending = error as? ApplicationRoutePending {
-                // 传播等待或格式过渡时只拆重放端，保留已经静音的 process tap。
-                var message = failure
-                do {
-                    try stopPlaybackAggregate()
-                    suspendedForOutputChange = true
-                } catch {
-                    // 停止重放本身失败时仍保留 tap；后续重试可以继续复用同一静音来源。
-                    suspendedForOutputChange = true
-                    message += "；停止重放端时：\(error.localizedDescription)"
-                }
-                if message == failure { throw pending }
-                throw AudioFailure(message)
+            // 新目标失败或格式未收敛，都先回到无设备绑定的持续静音状态。
+            // 暂停本身失败必须如实抛出，不能把残留的播放端标成已暂停。
+            do { try suspendForOutputChange() }
+            catch {
+                suspendedForOutputChange = false
+                throw AudioFailure("\(failure)；暂停重放端时：\(error.localizedDescription)")
             }
-            // 新目标创建失败时，旧重放端已经停止，但 process tap 仍能保持来源静音。
-            // 这里保留 tap，等下一次明确重试时复用，绝不通过 stop() 让原声恢复。
-            var message = failure
-            do { try stopPlaybackAggregate() }
-            catch { message += "；停止重放端时：\(error.localizedDescription)" }
-            suspendedForOutputChange = true
-            throw AudioFailure(message)
+            if error is ApplicationRoutePending { throw error }
+            throw AudioFailure(failure)
         }
     }
 

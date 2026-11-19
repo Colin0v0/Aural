@@ -1182,13 +1182,15 @@ struct OutputRoutingIntegrationTests {
         #expect(model.applicationAudioRoute(for: browser.id) == .custom(deviceUIDs: ["speaker"]))
 
         #expect(model.updateSimultaneousOutput(["headphone", "usb"]))
-        // 用户从组里移除 speaker 后，自定义意图不能继续指向组外设备。
-        #expect(model.applicationAudioRoute(for: browser.id) == .allOutputs)
-        #expect(model.appAudioRoutes["bundle:test.browser"] == nil)
+        // 移出组不是授权改去其他设备；保存原目标并暂停重放。
+        #expect(model.applicationAudioRoute(for: browser.id) == .custom(deviceUIDs: ["speaker"]))
+        #expect(model.appAudioRoutes["bundle:test.browser"] == .custom(deviceUIDs: ["speaker"]))
+        #expect(model.effectiveApplicationAudioRoute(for: browser.id) == .waitingForDevices)
+        #expect(model.sessions[browser.id]?.isSuspendedForOutputChange == true)
         #expect(model.shutdown())
     }
 
-    @Test func temporarilyDisconnectedCustomTargetFallsBackThenRestoresByUID() throws {
+    @Test func temporarilyDisconnectedCustomTargetPausesThenRestoresByUID() throws {
         let hardware = RoutingTestHardware()
         let audio = SessionFixture()
         let browser = applicationRow(bundleID: "test.browser", name: "Google Chrome", objectID: 43)
@@ -1212,7 +1214,7 @@ struct OutputRoutingIntegrationTests {
             model.refresh()
         }
         #expect(model.applicationAudioRoute(for: browser.id) == .custom(deviceUIDs: ["headphone"]))
-        #expect(model.effectiveApplicationAudioRoute(for: browser.id) == .allOutputs)
+        #expect(model.effectiveApplicationAudioRoute(for: browser.id) == .waitingForDevices)
 
         hardware.offline.remove(2)
         hardware.inactive.remove("headphone")
@@ -1249,7 +1251,8 @@ struct OutputRoutingIntegrationTests {
         model.stopSimultaneousOutput()
         #expect(!model.applicationAudioRoutingEnabled)
         #expect(model.applicationAudioRoute(for: browser.id) == .custom(deviceUIDs: ["speaker"]))
-        #expect(model.sessions.isEmpty)
+        #expect(model.sessions[browser.id]?.isSuspendedForOutputChange == true)
+        #expect(model.sessions[browser.id]?.isActive == false)
 
         #expect(model.startSimultaneousOutput(["speaker", "headphone"]))
         #expect(model.effectiveApplicationAudioRoute(for: browser.id) == .custom(deviceUIDs: ["speaker"]))
@@ -1398,6 +1401,7 @@ struct OutputRoutingIntegrationTests {
 @MainActor
 final class SessionFixture {
     var playing = true
+    var objectIDs: [AudioObjectID] = [42]
     var captureAccess: SystemAudioCaptureAccess = .authorized
     var omitsApplication = false
     var additionalRows: [ApplicationAudioRow] = []
@@ -1410,7 +1414,10 @@ final class SessionFixture {
     var now = Date(timeIntervalSince1970: 1_000)
     var sessions: [MemoryAudioSession] = []
     var row: ApplicationAudioRow {
-        let records = [AudioProcessRecord(objectID: 42, processID: 12, bundleID: "test.music", isRunningOutput: playing)]
+        let records = objectIDs.enumerated().map { index, object in
+            AudioProcessRecord(objectID: object, processID: 12 + Int32(index),
+                               bundleID: "test.music", isRunningOutput: playing)
+        }
         let app = RunningApplicationInfo(processID: 12, bundleID: "test.music", name: "测试音乐", bundleURL: nil)
         return ApplicationCatalog.rows(applications: [app], records: records, executableURLs: [:])[0]
     }
@@ -1434,7 +1441,7 @@ final class SessionFixture {
 
 @MainActor
 final class MemoryAudioSession: ApplicationAudioSession {
-    let group: AudioProcessGroup
+    var group: AudioProcessGroup
     var output: AudioOutput
     let mode: ApplicationAudioMode
     var playbackRoute: ApplicationPlaybackRoute
@@ -1452,6 +1459,9 @@ final class MemoryAudioSession: ApplicationAudioSession {
     var failSuspend = false
     var suspendsOnStartFailure = false
     var switchFailure: () -> Error? = { nil }
+    var startSuspendedCount = 0
+    var updateProcessesCount = 0
+    var playbackHistory: [[String]] = []
     var startFailure: () -> Error? = { nil }
     var healthFailure: () -> Error? = { nil }
     init(group: AudioProcessGroup, output: AudioOutput, route: ApplicationPlaybackRoute?, mode: ApplicationAudioMode) {
@@ -1476,6 +1486,7 @@ final class MemoryAudioSession: ApplicationAudioSession {
         playbackUIDs = playbackRoute.playbackDeviceUIDs
         isSuspendedForOutputChange = false
         isActive = true
+        playbackHistory.append(playbackUIDs)
     }
     func start() throws {
         if let error = startFailure() {
@@ -1486,6 +1497,18 @@ final class MemoryAudioSession: ApplicationAudioSession {
             throw error
         }
         isActive = true; isReleased = false
+        playbackHistory.append(playbackUIDs)
+    }
+    func startSuspended() throws {
+        if let error = startFailure() { throw error }
+        startSuspendedCount += 1
+        isActive = false
+        isReleased = false
+        isSuspendedForOutputChange = true
+    }
+    func updateProcesses(to group: AudioProcessGroup) throws {
+        updateProcessesCount += 1
+        self.group = group
     }
     func checkHealth(expectingAudio: Bool) throws {
         if let error = healthFailure() { throw error }
