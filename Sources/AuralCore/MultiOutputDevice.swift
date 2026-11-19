@@ -157,6 +157,10 @@ public struct MultiOutputHardware {
     public var create: ([String: Any]) throws -> AudioDeviceID
     public var select: (AudioDeviceID) throws -> Void
     public var destroy: (AudioDeviceID) throws -> Void
+    /// 静音写入必须确认成功；内存夹具需显式提供，不允许测试碰到宿主设备。
+    public var setMute: (Bool, AudioDeviceID) throws -> Void = { _, _ in
+        throw AudioFailure("未配置设备静音控制")
+    }
 
     public static var live: Self {
         Self(snapshot: SystemAudio.snapshot, selectedSystemOutputID: SystemAudio.selectedSystemOutputID,
@@ -189,8 +193,9 @@ public struct MultiOutputHardware {
         }, destroy: { deviceID in
             let interval = AudioSwitchTrace.begin("DestroyAggregate")
             defer { AudioSwitchTrace.end("DestroyAggregate", interval) }
-            try HAL.check(AudioHardwareDestroyAggregateDevice(deviceID), "释放多设备输出")
-        })
+            try HAL.checkTeardown(AudioHardwareDestroyAggregateDevice(deviceID), "释放多设备输出",
+                                  isObjectPresent: { try HAL.deviceExists(deviceID) })
+        }, setMute: SystemAudio.setMute)
     }
 }
 

@@ -53,6 +53,8 @@ Headphone diagnostics use real control transports. They are not offline tests, d
 
 ## README and preview assets
 
+For the resource state machine and fault-injection rules, see [Audio lifecycle](AUDIO_LIFECYCLE.md).
+
 ```sh
 # Validate local links, anchors, and image references without network access.
 python3 Scripts/check-docs.py

@@ -121,7 +121,7 @@ final class PanelActionControl: NSButton {
     var activate: () -> Void = {}
     var makeMenu: (() -> NSMenu)?
     var showsMenuOnClick = false
-    private var renderedContent: PanelActionButton.Content?
+    private(set) var renderedContent: PanelActionButton.Content?
     var hoverStyle: PanelActionHoverStyle = .background { didSet { updateAppearance() } }
     var idleTint: NSColor? { didSet { updateAppearance() } }
     private var hoverArea: NSTrackingArea?

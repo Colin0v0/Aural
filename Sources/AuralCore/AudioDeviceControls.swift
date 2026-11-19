@@ -35,6 +35,17 @@ public struct AudioDeviceMute: Equatable, Codable {
     public init(muted: Bool?, writable: Bool) { self.muted = muted; self.writable = writable }
 }
 
+/// 写入已被 HAL 接受，但本次读回尚未匹配；这不是写入失败，调用方只能观察同一个设备确认。
+public struct AudioDeviceMutePending: LocalizedError {
+    public let deviceID: AudioDeviceID
+    public let muted: Bool
+    public init(deviceID: AudioDeviceID, muted: Bool) {
+        self.deviceID = deviceID
+        self.muted = muted
+    }
+    public var errorDescription: String? { "设备未确认静音变更，请刷新后检查" }
+}
+
 /// 设备读取失败是显式错误；不影响其他设备的真实控制，也不制造默认读数。
 public enum AudioDeviceControlState: Equatable, Codable {
     case available(volume: AudioDeviceVolume, mute: AudioDeviceMute)
@@ -96,7 +107,7 @@ public enum AudioDeviceControls {
         }
         try HAL.write(device, muteAddress(direction), value: UInt32(muted ? 1 : 0))
         guard try mute(of: device, direction: direction).muted == muted else {
-            throw AudioFailure("设备未确认静音变更，请刷新后检查")
+            throw AudioDeviceMutePending(deviceID: device, muted: muted)
         }
     }
 }

@@ -10,6 +10,17 @@ final class AuralDelegate: NSObject, NSApplicationDelegate {
     private let bluetoothPermission = BluetoothPermissionRequest()
     private let audioPermission = AudioCapturePermissionRequest.live
     private let permissionRelaunch = ApplicationRelaunch.live
+    private var terminationTask: Task<Void, Never>?
+    private lazy var termination = ApplicationTermination(attempt: { [weak self] in
+        self?.model?.shutdownStep() ?? .complete
+    }, confirmUncleanExit: { [weak self] message in
+        self?.model?.diagnosticEventLog.record(category: "shutdown", message: message)
+        let alert = ApplicationTermination.makeFailureAlert(message, language: AppSettings.shared.resolvedLanguage)
+        return alert.runModal() == .alertSecondButtonReturn
+    }, cancelRestart: { [weak self] in
+        AuralUpdateChecker.shared.cancelPendingRestart()
+        self?.permissionRelaunch.cancel()
+    }, cancelShutdown: { [weak self] in self?.model?.cancelShutdown() })
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // 启动时先恢复用户保存的主题，避免设置窗口和菜单栏面板首帧使用系统默认外观。
@@ -94,17 +105,27 @@ final class AuralDelegate: NSObject, NSApplicationDelegate {
         audioPermission.cancel()
         // 主模型还不存在时，退出必须生效；系统会随进程结束回收私有探测资源。
         // 不为退出操作构造 AppModel，也不因清理失败把启动留在无界面的后台。
-        guard !fatalStartupFailure, let model else { return .terminateNow }
-        guard model.shutdown() else {
-            AuralUpdateChecker.shared.cancelPendingRestart()
-            permissionRelaunch.cancel()
-            return .terminateCancel
+        guard !fatalStartupFailure, model != nil else { return .terminateNow }
+        let reply = termination.request(at: ProcessInfo.processInfo.systemUptime)
+        if reply == .terminateLater, terminationTask == nil {
+            terminationTask = Task { @MainActor [weak self] in
+                while !Task.isCancelled {
+                    do { try await Task.sleep(for: .milliseconds(50)) }
+                    catch { return }
+                    guard let self else { return }
+                    if let decision = self.termination.poll(at: ProcessInfo.processInfo.systemUptime) {
+                        self.terminationTask = nil
+                        NSApp.reply(toApplicationShouldTerminate: decision)
+                        return
+                    }
+                }
+            }
         }
-        return .terminateNow
+        return reply
     }
 
     func applicationWillTerminate(_ notification: Notification) {
-        // 只有前面的音频、组合设备和耳机资源都清理成功后，退出阶段才启动替换 helper。
+        // 未完整清理的退出已撤销更新意图；只有正常清理完成才会启动替换 helper。
         AuralUpdateChecker.shared.launchInstallerIfPending()
     }
 }

@@ -28,6 +28,27 @@ struct MixerTests {
 }
 
 struct RenderCallbackTests {
+    @Test func lifecycleGateSilencesTheVeryNextCallbackWithoutChangingUserGain() {
+        let source = UnsafeMutablePointer<Float>.allocate(capacity: 2)
+        let destination = UnsafeMutablePointer<Float>.allocate(capacity: 2)
+        source.initialize(repeating: 0.8, count: 2)
+        destination.initialize(repeating: 99, count: 2)
+        defer { source.deallocate(); destination.deallocate() }
+        let input = AudioBufferList.allocate(maximumBuffers: 1)
+        let output = AudioBufferList.allocate(maximumBuffers: 1)
+        defer { input.unsafeMutablePointer.deallocate(); output.unsafeMutablePointer.deallocate() }
+        input[0] = AudioBuffer(mNumberChannels: 2, mDataByteSize: 8, mData: source)
+        output[0] = AudioBuffer(mNumberChannels: 2, mDataByteSize: 8, mData: destination)
+        let state = RenderState(sampleRate: 48_000)
+        state.target.store(Float(0.7).bitPattern, ordering: .relaxed)
+        state.outputEnabled.store(false, ordering: .releasing)
+        var time = AudioTimeStamp()
+        _ = auralAudioCallback(0, &time, input.unsafePointer, &time, output.unsafeMutablePointer, &time,
+                              Unmanaged.passUnretained(state).toOpaque())
+        #expect(destination[0] == 0 && destination[1] == 0)
+        #expect(source[0] == 0.8 && state.target.load(ordering: .relaxed) == Float(0.7).bitPattern)
+    }
+
     @Test func interleavedGainDoesNotAlterSource() {
         let frames = 1_200
         let source = UnsafeMutablePointer<Float>.allocate(capacity: frames * 2)

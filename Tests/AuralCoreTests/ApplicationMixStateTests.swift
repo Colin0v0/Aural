@@ -29,6 +29,22 @@ struct ApplicationMixStateTests {
         #expect(state.action(group: group, sessionObjectIDs: nil) == .start)
     }
 
+    @Test func processReadRecoveryClearsOnlyTheTypedObservationFailure() throws {
+        var state = ApplicationMixState()
+        state.enable(outputUID: "headphone")
+        try state.setGain(0.4)
+        state.toggleMute()
+        state.markProcessReadFailure("进程观察暂不可用")
+        #expect(state.failureReason == .processRead("进程观察暂不可用"))
+        state.recoverProcessReadFailure()
+        #expect(state.failure == nil && state.gain == 0.4 && state.muted)
+        #expect(state.boundOutputUID == "headphone")
+        // 相同文案也不能把处理失败冒充可恢复的只读观察失败。
+        state.fail("进程观察暂不可用")
+        state.recoverProcessReadFailure()
+        #expect(state.failureReason == .other("进程观察暂不可用"))
+    }
+
     @Test func processMembershipChangesRequireReplacementNotDuplicateTaps() {
         var state = ApplicationMixState()
         state.enable(outputUID: "test-output")

@@ -169,6 +169,7 @@ struct OutputRoutingErrorTests {
         #expect(model.outputRouting.phase == .stable)
         #expect(model.multiOutputError == nil)
         #expect(model.outputRouting.confirmed?.output.id == fixture.outputs[1].id)
+        #expect(fixture.mutedIDs == [fixture.outputs[1].id])
     }
 
     @Test func stoppingSingleDeviceModeOnlyChangesModeIdentity() {
@@ -376,6 +377,7 @@ private final class RoutingHardwareFixture {
     var offline: Set<AudioDeviceID> = []
     var selections: [AudioDeviceID] = []
     var destroyed: [AudioDeviceID] = []
+    var mutedIDs: Set<AudioDeviceID> = []
     var destroyAttempts = 0
     var failCreation = false
     var failDestroy = false
@@ -408,6 +410,8 @@ private final class RoutingHardwareFixture {
                 self.destroyed.append(id)
                 if self.keepAggregateAfterDestroy { return }
                 if id == 99 { self.composition = nil }
+            }, setMute: { muted, id in
+                if muted { self.mutedIDs.insert(id) } else { self.mutedIDs.remove(id) }
             })
     }
 }

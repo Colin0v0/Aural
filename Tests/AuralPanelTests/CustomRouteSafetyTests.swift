@@ -215,7 +215,7 @@ struct CustomRouteSafetyTests {
 
 @MainActor
 struct CustomRoutePresentationTests {
-    @Test func pausedRouteUsesANeutralControlAndKeepsTheSavedSelectionInItsMenu() throws {
+    @Test func waitingRouteKeepsTheRoutingControlAndSavedSelectionWithoutAPauseButton() throws {
         let app = ApplicationAudioRow(id: "bundle:test.music", bundleID: "test.music", name: "Music",
                                        applicationURL: nil, group: nil, isRunningOutput: true)
         let row = ApplicationMixerRow(app: app, state: ApplicationMixState(),
@@ -234,7 +234,8 @@ struct CustomRoutePresentationTests {
         let pause = try #require(controls(host).first {
             $0.toolTip == "Selected output unavailable. Playback paused."
         })
-        #expect(pause.idleTint == NSColor(PanelStyle.secondary))
+        #expect(pause.idleTint == NSColor(PanelStyle.accent))
+        #expect(pause.renderedContent == .symbol("arrow.triangle.branch"))
         let menu = try #require(pause.makeMenu?())
         #expect(menu.items.first?.state == .off)
         #expect(menu.items.first?.isEnabled == true)

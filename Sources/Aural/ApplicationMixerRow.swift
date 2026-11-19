@@ -92,12 +92,7 @@ struct ApplicationMixerRow: View {
                         .background(PanelStyle.canvas, in: Circle())
                         .help(L10n.text(error, language: language))
                         .accessibilityLabel(L10n.text(error, language: language))
-                } else if routePaused {
-                    Image(systemName: "pause.circle.fill")
-                        .font(.system(size: 10)).foregroundStyle(PanelStyle.secondary)
-                        .background(PanelStyle.canvas, in: Circle())
-                        .help(L10n.text("所选输出不可用，已暂停播放", language: language))
-                } else if state.managed && awaitingStream {
+                } else if state.managed && awaitingStream && !routePaused {
                     Circle().fill(.orange).frame(width: 6, height: 6)
                         .help(L10n.text("等待音频流", language: language))
                 }
@@ -219,9 +214,9 @@ struct ApplicationMixerRow: View {
     /// 路由按钮保持 26pt 方形并沿用现有前景悬停规则，避免应用行因为新增入口撑高。
     private var routingButton: some View {
         var button = PanelActionButton(
-            systemName: routePaused ? "pause.circle" : "arrow.triangle.branch",
+            systemName: "arrow.triangle.branch",
             title: routingTitle,
-            tint: routePaused ? PanelStyle.secondary : (audioRoute.isCustom ? PanelStyle.accent : nil),
+            tint: audioRoute.isCustom ? PanelStyle.accent : nil,
             hoverStyle: .foregroundOnly,
             menu: { routeMenu() }
         )

@@ -9,6 +9,8 @@ public enum ApplicationMixFailure: Equatable {
     case fineTuneRunning
     case fineTuneExited
     case outputChanged
+    /// 只读进程观察失败单独标记，恢复时不能误清其他处理失败。
+    case processRead(String)
     case other(String)
 
     public var message: String {
@@ -16,7 +18,7 @@ public enum ApplicationMixFailure: Equatable {
         case .fineTuneRunning: return "请先手动退出 FineTune，避免重复处理音频。"
         case .fineTuneExited: return "FineTune 已退出，音量配置尚未应用。"
         case .outputChanged: return "系统输出已改变；点重新应用后才会在新设备上处理。"
-        case .other(let message): return message
+        case .processRead(let message), .other(let message): return message
         }
     }
 }
@@ -49,6 +51,11 @@ public struct ApplicationMixState: Equatable {
     }
     public mutating func disable() { managed = false; boundOutputUID = nil; failureReason = nil }
     public mutating func fail(_ message: String) { failureReason = .other(message) }
+    public mutating func markProcessReadFailure(_ message: String) { failureReason = .processRead(message) }
+    public mutating func recoverProcessReadFailure() {
+        guard case .processRead = failureReason else { return }
+        failureReason = nil
+    }
     public mutating func markOutputChanged() { failureReason = .outputChanged }
     public mutating func blockForFineTune() { failureReason = .fineTuneRunning }
 

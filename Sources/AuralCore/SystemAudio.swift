@@ -25,6 +25,8 @@ public enum HAL {
     private static let serverRestartedStatus = OSStatus(-308)
     /// Core Audio 的 `!obj`：列表给出对象后，对象在逐项读取前已经被系统销毁或替换。
     public static let badObjectStatus = OSStatus(kAudioHardwareBadObjectError)
+    /// Core Audio 的 `!dev`：传入的 ID 不能作为有效设备使用，不单独证明资源已经消失。
+    public static let badDeviceStatus = OSStatus(kAudioHardwareBadDeviceError)
 
     public static func address(_ selector: AudioObjectPropertySelector,
                                scope: AudioObjectPropertyScope = kAudioObjectPropertyScopeGlobal,
@@ -36,6 +38,59 @@ public enum HAL {
         guard status == noErr else {
             throw AudioFailure("\(operation)失败（Core Audio \(status)）", status: status)
         }
+    }
+
+    /// 这两类错误只允许进一步核实对象是否消失，不能单凭错误码释放回调上下文。
+    public static func isMissingObjectStatus(_ status: OSStatus) -> Bool {
+        status == badObjectStatus || status == badDeviceStatus
+    }
+
+    /// 错误统一保留操作名和 OSStatus，不依赖不同 SDK 中 Swift 音频错误包装类型的字段。
+    /// 空描述也必须可诊断，不能在界面上只剩 `com.google.Chrome：`。
+    static func operationFailure(_ error: Error, operation: String) -> AudioFailure {
+        if let failure = error as? AudioFailure, !failure.message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return failure
+        }
+        let nsError = error as NSError
+        let status: OSStatus?
+        if let failure = error as? AudioFailure {
+            status = failure.status
+        } else if nsError.domain == NSOSStatusErrorDomain {
+            status = OSStatus(nsError.code)
+        } else {
+            status = nil
+        }
+        let detail = error.localizedDescription.trimmingCharacters(in: .whitespacesAndNewlines)
+        let statusText = status.map { "（Core Audio \($0)）" } ?? ""
+        let message: String
+        if detail.isEmpty {
+            message = "\(operation)失败\(statusText)"
+        } else {
+            message = "\(operation)失败：\(detail)\(statusText)"
+        }
+        return AudioFailure(message, status: status)
+    }
+
+    /// 只有完整枚举确认同一个 ID 已消失，才把失效对象错误视为已清理；读取失败仍保留所有权。
+    static func checkTeardown(_ status: OSStatus, _ operation: String,
+                              isObjectPresent: () throws -> Bool) throws {
+        guard status != noErr else { return }
+        let failure = AudioFailure("\(operation)失败（Core Audio \(status)）", status: status)
+        guard isMissingObjectStatus(status) else { throw failure }
+        do {
+            if try !isObjectPresent() { return }
+        } catch {
+            throw AudioFailure("\(failure.message)；无法确认资源是否消失：\(error.localizedDescription)", status: status)
+        }
+        throw failure
+    }
+
+    static func deviceExists(_ deviceID: AudioDeviceID) throws -> Bool {
+        try ids(system, address(kAudioHardwarePropertyDevices)).contains(deviceID)
+    }
+
+    static func tapExists(_ tapID: AudioObjectID) throws -> Bool {
+        try ids(system, address(kAudioHardwarePropertyTapList)).contains(tapID)
     }
 
     public static func hasProperty(_ object: AudioObjectID, _ address: AudioObjectPropertyAddress) -> Bool {
@@ -111,13 +166,14 @@ public enum HAL {
         }
     }
 
-    public static func write<T>(_ object: AudioObjectID, _ address: AudioObjectPropertyAddress, value: T) throws {
+    public static func write<T>(_ object: AudioObjectID, _ address: AudioObjectPropertyAddress, value: T,
+                                operation: String = "写入音频属性") throws {
         var address = address
         var value = value
         let status = withUnsafePointer(to: &value) {
             AudioObjectSetPropertyData(object, &address, 0, nil, UInt32(MemoryLayout<T>.size), $0)
         }
-        try check(status, "写入音频属性")
+        try check(status, operation)
     }
 }
 
