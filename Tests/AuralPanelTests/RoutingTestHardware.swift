@@ -32,6 +32,8 @@ final class RoutingTestHardware {
     var muteWrites: [(Bool, AudioDeviceID)] = []
     var mutedIDs: Set<AudioDeviceID> = []
     var failMute = false
+    var deferMute = false
+    var pendingMutes: [AudioDeviceID: Bool] = [:]
     var beforeMute: ((AudioDeviceID) -> Void)?
     var destroyed: [AudioDeviceID] = []
     var created: [AudioDeviceID] = []
@@ -57,6 +59,11 @@ final class RoutingTestHardware {
         selected = pendingSelection
         systemSelected = pendingSelection
         self.pendingSelection = nil
+    }
+
+    func commitMute(on id: AudioDeviceID) {
+        guard let muted = pendingMutes.removeValue(forKey: id) else { return }
+        if muted { mutedIDs.insert(id) } else { mutedIDs.remove(id) }
     }
 
     var hardware: MultiOutputHardware {
@@ -103,6 +110,10 @@ final class RoutingTestHardware {
                 self.beforeMute?(id)
                 if self.failMute { throw AudioFailure("注入：设备静音失败") }
                 self.muteWrites.append((muted, id))
+                if self.deferMute {
+                    self.pendingMutes[id] = muted
+                    throw AudioDeviceMutePending(deviceID: id, muted: muted)
+                }
                 if muted { self.mutedIDs.insert(id) } else { self.mutedIDs.remove(id) }
             })
     }

@@ -233,6 +233,132 @@ struct OutputProtectionRecoveryTests {
         f.hardware.failMute = false
     }
 
+    @Test func delayedMuteReadbackWaitsWithoutErrorOrRepeatedWrites() throws {
+        let f = try Fixture(headphoneSelected: true)
+        defer { f.close() }
+        f.model.setApplicationGain(0.4, for: f.id)
+        let session = try #require(f.model.sessions[f.id] as? MemoryAudioSession)
+        f.hardware.deferMute = true
+        f.hardware.outputs.removeAll { $0.id == 2 }
+        f.hardware.selected = 1; f.hardware.systemSelected = 1
+        f.model.refresh()
+        #expect(f.model.outputRouting.phase == .awaitingHAL && f.model.outputRouting.error == nil)
+        #expect(session.isSuspendedForOutputChange && !session.isActive)
+        for _ in 0..<4 { f.model.refresh() }
+        #expect(f.hardware.muteWrites.count == 1)
+        #expect(f.model.mixStates[f.id]?.failure == nil)
+        f.hardware.commitMute(on: 1)
+        f.model.refresh()
+        #expect(f.model.outputRouting.phase == .stable && f.model.outputRouting.error == nil)
+        #expect(f.model.outputRouting.confirmed?.output.uid == "speaker")
+        #expect(f.hardware.muteWrites.count == 1 && f.hardware.mutedIDs == [1])
+        #expect(session.isActive && session.gain == 0.4 && session.stopCount == 0)
+    }
+
+    @Test func unconfirmedHeadphoneMuteCannotPoisonReturnToTheOriginalSpeaker() throws {
+        let f = try Fixture()
+        defer { f.close() }
+        f.hardware.deferMute = true
+        f.hardware.selected = 2; f.hardware.systemSelected = 2
+        f.model.refresh()
+        #expect(f.model.outputRouting.phase == .awaitingHAL)
+        // 与报告中的后半段一致：报错目标是耳机，而当前媒体输出后来回到原来的扬声器。
+        f.hardware.outputs.removeAll { $0.id == 2 }
+        f.hardware.selected = 1; f.hardware.systemSelected = 1
+        f.audio.now = f.audio.now.addingTimeInterval(120)
+        f.model.refresh()
+        #expect(f.model.outputRouting.error == nil && f.model.outputRouting.phase != .failed)
+        #expect(f.model.outputRouting.confirmed?.output.uid == "speaker")
+        #expect(f.hardware.muteWrites.map { $0.1 } == [2])
+    }
+
+    @Test func persistentMuteMismatchHasAFixedDeadlineAndKeepsTheTapPaused() throws {
+        let f = try Fixture(headphoneSelected: true)
+        defer { f.close() }
+        f.model.setApplicationGain(0.4, for: f.id)
+        let session = try #require(f.model.sessions[f.id] as? MemoryAudioSession)
+        f.hardware.deferMute = true
+        f.hardware.outputs.removeAll { $0.id == 2 }
+        f.hardware.selected = 1; f.hardware.systemSelected = 1
+        f.model.refresh()
+        f.audio.now = f.audio.now.addingTimeInterval(2.9)
+        f.model.refresh()
+        #expect(f.model.outputRouting.error == nil)
+        f.audio.now = f.audio.now.addingTimeInterval(0.2)
+        f.model.refresh()
+        #expect(f.model.outputRouting.phase == .failed)
+        #expect(f.model.outputRouting.error?.contains("期限") == true)
+        #expect(session.isSuspendedForOutputChange && session.stopCount == 0)
+        #expect(f.hardware.muteWrites.count == 1)
+        f.hardware.commitMute(on: 1)
+        f.model.refresh()
+        #expect(f.model.outputRouting.phase == .failed)
+    }
+
+    @Test func anotherDevicesMuteCannotConfirmThePendingTarget() throws {
+        let f = try Fixture(headphoneSelected: true)
+        defer { f.close() }
+        f.hardware.deferMute = true
+        f.hardware.outputs.removeAll { $0.id == 2 }
+        f.hardware.selected = 1; f.hardware.systemSelected = 1
+        f.model.refresh()
+        f.hardware.mutedIDs.insert(3)
+        f.model.refresh()
+        #expect(f.model.outputRouting.phase == .awaitingHAL && f.model.outputRouting.error == nil)
+        f.hardware.commitMute(on: 1)
+        f.model.refresh()
+        #expect(f.model.outputRouting.confirmed?.output.uid == "speaker")
+    }
+
+    @Test func explicitSelectionSupersedesPendingAutomaticMuteWithoutUnmutingDevices() throws {
+        let f = try Fixture(headphoneSelected: true)
+        defer { f.close() }
+        f.hardware.deferMute = true
+        f.hardware.outputs.removeAll { $0.id == 2 }
+        f.hardware.selected = 1; f.hardware.systemSelected = 1
+        f.model.refresh()
+        f.model.selectOutput(3)
+        #expect(f.model.outputRouting.confirmed?.output.uid == "usb")
+        #expect(f.model.outputRouting.error == nil && !f.model.outputRouting.phase.isBusy)
+        #expect(f.hardware.muteWrites.count == 1 && f.hardware.muteWrites.first?.0 == true)
+    }
+
+    @Test func aReplacementHandleRequiresItsOwnMuteConfirmation() throws {
+        let f = try Fixture(headphoneSelected: true)
+        defer { f.close() }
+        f.hardware.deferMute = true
+        f.hardware.outputs.removeAll { $0.id == 2 }
+        f.hardware.selected = 1; f.hardware.systemSelected = 1
+        f.model.refresh()
+        f.hardware.outputs.removeAll { $0.id == 1 }
+        f.hardware.outputs.append(AudioOutput(id: 4, uid: "speaker", name: "扬声器新句柄", transport: kAudioDeviceTransportTypeBuiltIn))
+        f.hardware.selected = 4; f.hardware.systemSelected = 4
+        f.model.refresh()
+        #expect(f.hardware.muteWrites.map { $0.1 } == [1, 4])
+        f.hardware.commitMute(on: 1)
+        f.model.refresh()
+        #expect(f.model.outputRouting.phase == .awaitingHAL)
+        f.hardware.commitMute(on: 4)
+        f.model.refresh()
+        #expect(f.model.outputRouting.confirmed?.output.id == 4 && f.model.outputRouting.error == nil)
+    }
+
+    @Test func delayedProtectionOfAnOutsiderPreservesTheUnavailableGroupSelection() throws {
+        let f = try Fixture()
+        defer { f.close() }
+        #expect(f.model.startSimultaneousOutput(["headphone", "usb"]))
+        f.hardware.deferMute = true
+        f.hardware.offline.formUnion([2, 3])
+        f.hardware.selected = 1; f.hardware.systemSelected = 1
+        f.model.refresh()
+        #expect(f.model.outputRouting.phase == .awaitingHAL)
+        f.hardware.commitMute(on: 1)
+        f.model.refresh()
+        #expect(f.model.outputRouting.phase == .awaitingMembers && f.model.outputRouting.error == nil)
+        #expect(f.model.outputRouting.configured?.memberUIDs == ["headphone", "usb"])
+        #expect(f.hardware.muteWrites.count == 1)
+    }
+
     @Test func recoveredProcessReadResumesTheSameTapAndPreservesSettings() throws {
         let f = try Fixture()
         defer { f.close() }

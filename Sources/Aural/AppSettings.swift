@@ -295,6 +295,7 @@ enum L10n {
         "仍然退出会结束 Aural 的音频处理，应用原声可能恢复，残留多输出设备可能需要手动移除。": "Quitting will end Aural's audio processing. Original app audio may resume, and remaining multi-output devices may need manual removal.",
         "仍然退出": "Quit Anyway",
         "系统未在期限内完成音频资源释放。": "macOS did not finish releasing audio resources before the deadline.",
+        "设备未在期限内确认静音变更，请重新选择输出": "The device did not confirm mute before the deadline. Select an output again.",
         "退出": "Quit",
         "版本 %@": "Version %@",
         "重试释放": "Retry Release",

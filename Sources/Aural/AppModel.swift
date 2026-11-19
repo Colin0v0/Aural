@@ -191,8 +191,12 @@ final class AppModel: ObservableObject {
         }
         routing.beforeAdoptingUnexpectedOutput = { [weak self] output in
             guard let self else { return }
-            // 使用设备公开的静音控制并读回确认；不支持就明确失败，绝不改音量冒充静音。
-            try self.outputHardware.setMute(true, output.id)
+            // 写入后尚未读回的情况交回路由事务等待，不把它伪装成成功，也不立即锁存永久失败。
+            do { try self.outputHardware.setMute(true, output.id) }
+            catch let pending as AudioDeviceMutePending {
+                self.diagnosticEventLog.record(category: "outputProtection", message: "unexpected output mute awaiting confirmation: \(output.uid)")
+                throw pending
+            }
             self.diagnosticEventLog.record(category: "outputProtection", message: "unexpected output muted: \(output.uid)")
         }
         routing.didChange = { [weak self] state in
