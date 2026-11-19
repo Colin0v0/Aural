@@ -522,9 +522,19 @@ public final class OutputRoutingController {
     }
 
     public func observationFailed(_ error: Error) {
-        // 仅设备枚举未收敛且没有正在执行的切换时，允许下一份有效观察清除错误。
-        recoverableObservationFailure = error is AudioSnapshotPending && !state.phase.isBusy
         observationDeadline = nil
+        // 已经失败的明确操作必须保留原始原因；随后发生的轮询错误没有资格覆盖或清除它。
+        if state.phase == .failed, !recoverableObservationFailure {
+            latestSnapshot = nil
+            state.actualOutput = nil
+            state.actualSystemOutputID = nil
+            return
+        }
+        // 此入口接收模型的只读快照失败。who? 属性错误持续一段时间仍需报告，
+        // 但整份事实读回后应解除这次观察失败，不重发写请求、不猜测替代设备。
+        let unavailableProperty = (error as? AudioFailure)?.status == kAudioHardwareUnknownPropertyError
+        recoverableObservationFailure = recoverableObservationFailure
+            || (!state.phase.isBusy && (error is AudioSnapshotPending || unavailableProperty))
         fail(error, snapshot: nil, at: Date())
     }
 

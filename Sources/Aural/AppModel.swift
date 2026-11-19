@@ -463,6 +463,20 @@ final class AppModel: ObservableObject {
                 updateRouteConfirmationActivity()
                 return
             }
+            // who? 是属性不可读，不是 !obj。设备重新注册时可能短暂返回这个值；
+            // 只在同一次只读快照的三秒窗口内等待，持续缺属性仍按真实失败报告。
+            if let failure = error as? AudioFailure,
+               failure.status == kAudioHardwareUnknownPropertyError,
+               !outputRouting.phase.isBusy, outputRouting.phase != .failed {
+                if pendingAudioSnapshotDeadline == nil {
+                    pendingAudioSnapshotDeadline = routingNow.addingTimeInterval(3)
+                }
+                if let until = pendingAudioSnapshotDeadline, routingNow < until {
+                    suspendUncertainAudioObservation()
+                    updateRouteConfirmationActivity()
+                    return
+                }
+            }
             pendingAudioSnapshotDeadline = nil
             routing.observationFailed(error)
             pendingApplicationReapplies.removeAll()
