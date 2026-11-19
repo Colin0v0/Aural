@@ -66,19 +66,23 @@ public final class AudioPermissionProbe {
     public func stop() throws {
         // 某一步释放失败就保留剩余资源标识，由调用方报告，不吞错或改走其他授权 API。
         if started {
-            try HAL.check(AudioDeviceStop(aggregateID, ioProc), "停止音频授权输入")
+            try HAL.checkTeardown(AudioDeviceStop(aggregateID, ioProc), "停止音频授权输入",
+                                  isObjectPresent: { try HAL.deviceExists(aggregateID) })
             started = false
         }
         if let ioProc {
-            try HAL.check(AudioDeviceDestroyIOProcID(aggregateID, ioProc), "释放音频授权回调")
+            try HAL.checkTeardown(AudioDeviceDestroyIOProcID(aggregateID, ioProc), "释放音频授权回调",
+                                  isObjectPresent: { try HAL.deviceExists(aggregateID) })
             self.ioProc = nil
         }
         if aggregateID != 0 {
-            try HAL.check(AudioHardwareDestroyAggregateDevice(aggregateID), "释放音频授权输入")
+            try HAL.checkTeardown(AudioHardwareDestroyAggregateDevice(aggregateID), "释放音频授权输入",
+                                  isObjectPresent: { try HAL.deviceExists(aggregateID) })
             aggregateID = 0
         }
         if tapID != 0 {
-            try HAL.check(AudioHardwareDestroyProcessTap(tapID), "释放音频授权 tap")
+            try HAL.checkTeardown(AudioHardwareDestroyProcessTap(tapID), "释放音频授权 tap",
+                                  isObjectPresent: { try HAL.tapExists(tapID) })
             tapID = 0
         }
     }

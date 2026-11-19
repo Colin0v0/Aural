@@ -1,5 +1,6 @@
 import Testing
 import CoreAudio
+import Foundation
 @testable import AuralCore
 
 struct SystemAudioTests {
@@ -26,6 +27,34 @@ struct SystemAudioTests {
         // 直接校验用户日志里的十进制状态码，不能再用 !obj 夹具替代 who?。
         #expect(OSStatus(kAudioHardwareUnknownPropertyError) == 2_003_332_927)
         #expect(OSStatus(kAudioHardwareUnknownPropertyError) != HAL.badObjectStatus)
+    }
+
+    @Test func missingDeviceIsSuccessfulTeardownButOtherStatusesAreNot() throws {
+        // 用户日志中的 560227702 是 `!dev`；设备已消失时不能把清理永久卡在重试。
+        #expect(HAL.badDeviceStatus == 560_227_702)
+        #expect(HAL.isMissingObjectStatus(HAL.badDeviceStatus))
+        #expect(HAL.isMissingObjectStatus(HAL.badObjectStatus))
+        #expect(!HAL.isMissingObjectStatus(kAudioHardwareUnsupportedOperationError))
+        #expect(throws: AudioFailure.self) {
+            try HAL.checkTeardown(kAudioHardwareUnsupportedOperationError, "停止音频回调", isObjectPresent: { false })
+        }
+        try HAL.checkTeardown(HAL.badDeviceStatus, "停止音频回调", isObjectPresent: { false })
+        #expect(throws: AudioFailure.self) {
+            try HAL.checkTeardown(HAL.badDeviceStatus, "停止音频回调", isObjectPresent: { true })
+        }
+    }
+
+    @Test func emptyWrapperErrorStillCarriesOperationAndCoreAudioStatus() {
+        // AudioHardwareTap 的错误描述可能为空；状态码必须保留，界面不能只显示“Chrome：”。
+        let error = NSError(domain: NSOSStatusErrorDomain, code: Int(HAL.badDeviceStatus),
+                            userInfo: [NSLocalizedDescriptionKey: "   "])
+        let failure = HAL.operationFailure(error, operation: "更新应用静音捕获")
+        #expect(failure.status == HAL.badDeviceStatus)
+        #expect(!failure.message.isEmpty)
+        #expect(failure.message.contains("更新应用静音捕获"))
+        #expect(failure.message.contains("560227702"))
+        let blankFailure = HAL.operationFailure(AudioFailure("", status: HAL.badObjectStatus), operation: "更新捕获")
+        #expect(blankFailure.status == HAL.badObjectStatus && blankFailure.message.contains("更新捕获"))
     }
 
     @Test func invalidObjectStillListedProducesPendingSnapshotInsteadOfPartialSuccess() {
@@ -327,5 +356,5 @@ struct SystemAudioTests {
         #expect(!SystemAudio.activeAggregateRouteContains("other", composition: composition as CFDictionary, activeUIDs: ["other"]))
     }
 
-    @Test func versionIsDefined() { #expect(AuralVersion.current == "0.3.9") }
+    @Test func versionIsDefined() { #expect(AuralVersion.current == "0.3.10") }
 }

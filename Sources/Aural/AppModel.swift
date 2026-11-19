@@ -109,6 +109,14 @@ final class AppModel: ObservableObject {
     private var applicationListSettleDeadline: Date?
     /// 用户明确要求的 APP 重试绑定到这一次目标路由；HAL 尚未确认时不清错、不提前建会话。
     private var pendingApplicationReapplies: [String: OutputRoutingIntent] = [:]
+    /// 恢复凭据绑定原会话、进程和精确播放路径，不用错误字符串猜测清错资格。
+    private struct ProcessReadRecovery {
+        let sessionID: ObjectIdentifier
+        let group: AudioProcessGroup
+        let route: ApplicationPlaybackRoute
+        let storedRoute: AppAudioRoute
+    }
+    private var processReadRecoveries: [String: ProcessReadRecovery] = [:]
     private let outputHardware: MultiOutputHardware
     private let monitorsSystem: Bool
     private var timer: Timer?
@@ -135,7 +143,11 @@ final class AppModel: ObservableObject {
         mScope: kAudioObjectPropertyScopeGlobal,
         mElement: kAudioObjectPropertyElementMain
     )
-    private var isShutdown = false
+    private enum Lifecycle { case running, stopping, stopped }
+    private var lifecycle: Lifecycle = .running
+    private var isShutdown: Bool { lifecycle == .stopped }
+    private var isShuttingDown: Bool { lifecycle == .stopping }
+    private var shutdownRouteRequested = false
 
     /// 正式应用在主线程显式取得 HAL，避免默认参数在非隔离上下文读取主线程状态。
     convenience init(startsMonitoring: Bool = true) {
@@ -173,8 +185,15 @@ final class AppModel: ObservableObject {
         routing.isUserSelectingOutput = userIsSelectingOutput ?? SystemOutputPicker.isInUse
         routing.beforeChanging = { [weak self] in
             guard let self else { return }
+            self.processReadRecoveries.removeAll()
             try self.suspendApplicationsForOutputChange()
             self.sessionRouteWaitSince.removeAll()
+        }
+        routing.beforeAdoptingUnexpectedOutput = { [weak self] output in
+            guard let self else { return }
+            // 使用设备公开的静音控制并读回确认；不支持就明确失败，绝不改音量冒充静音。
+            try self.outputHardware.setMute(true, output.id)
+            self.diagnosticEventLog.record(category: "outputProtection", message: "unexpected output muted: \(output.uid)")
         }
         routing.didChange = { [weak self] state in
             guard let self else { return }
@@ -224,7 +243,7 @@ final class AppModel: ObservableObject {
         sleepObserver = NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.willSleepNotification,
                                                                           object: nil, queue: .main) { [weak self] _ in
             Task { @MainActor in
-                guard let self else { return }
+                guard let self, !self.isShuttingDown, !self.isShutdown else { return }
                 self.diagnosticEventLog.record(category: "lifecycle", message: "system will sleep")
                 self.headphones.suspend()
                 self.pauseManagedApplications("已在休眠前暂停应用音量；唤醒后请点重新应用。")
@@ -233,7 +252,7 @@ final class AppModel: ObservableObject {
         wakeObserver = NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didWakeNotification,
                                                                          object: nil, queue: .main) { [weak self] _ in
             Task { @MainActor in
-                guard let self, !self.isShutdown else { return }
+                guard let self, !self.isShutdown, !self.isShuttingDown else { return }
                 self.diagnosticEventLog.record(category: "lifecycle", message: "system did wake")
                 self.headphones.resume()
                 self.refresh()
@@ -301,7 +320,7 @@ final class AppModel: ObservableObject {
     }
 
     func refresh() {
-        guard !isShutdown else { return }
+        guard !isShutdown, !isShuttingDown else { return }
         refreshAudio()
         guard applicationEnvironment != nil, pendingAudioSnapshotDeadline == nil,
               !routing.hasPendingObservation else { return }
@@ -311,7 +330,7 @@ final class AppModel: ObservableObject {
     /// 隐藏且没有用户管理的音频会话时，周期任务只刷新输出路由；
     /// 进程归属和输入设备枚举留给面板打开或用户主动操作，避免空闲时反复做完整扫描。
     private func refreshForPeriodicTimer() {
-        guard !isShutdown else { return }
+        guard !isShutdown, !isShuttingDown else { return }
         refreshAudio()
         guard applicationEnvironment != nil, shouldRefreshApplicationStateDuringPolling,
               pendingAudioSnapshotDeadline == nil, !routing.hasPendingObservation else { return }
@@ -325,6 +344,7 @@ final class AppModel: ObservableObject {
     }
 
     private func refreshApplicationState() {
+        guard !isShutdown, !isShuttingDown else { return }
         guard let applicationEnvironment else { return }
         refreshAudioCaptureAccess()
         if monitorsSystem { refreshInputs() }
@@ -341,7 +361,7 @@ final class AppModel: ObservableObject {
             // 枚举失败就报告失败并暂停；不换另一份进程来源，也不把读取失败伪装成零个进程。
             for source in levelSources.values { source.update(nil) }
             if processError != error.localizedDescription { processError = error.localizedDescription }
-            pauseManagedApplications("音频进程读取失败：\(error.localizedDescription)")
+            pauseForProcessReadFailure(error)
         }
         // 轮询结果未变化时不能写回 @Published 字典，否则整个面板会每两秒无意义重算一次。
         var nextMixStates = mixStates
@@ -362,6 +382,7 @@ final class AppModel: ObservableObject {
             }
         }
         if mixStatesChanged { mixStates = nextMixStates }
+        if processError == nil { recoverProcessReadFailures() }
         reconcileSessions()
     }
 
@@ -513,7 +534,7 @@ final class AppModel: ObservableObject {
         guard routeConfirmationTimer == nil else { return }
         let timer = Timer(timeInterval: 0.05, repeats: true) { [weak self] _ in
             Task { @MainActor in
-                guard let self else { return }
+                guard let self, !self.isShutdown, !self.isShuttingDown else { return }
                 self.refreshAudio()
                 // 过渡期间只观察路由；不能以 20Hz 反复枚举全部 APP、输入设备或启动 tap。
                 if !self.outputRouting.phase.isBusy, !self.routing.hasPendingRelease,
@@ -982,7 +1003,64 @@ final class AppModel: ObservableObject {
         return "bundle:\(app.bundleID)"
     }
 
+    /// 读取失败不覆盖已有真实错误；只有已知的失效/未知属性观察错误可获恢复资格。
+    private func pauseForProcessReadFailure(_ error: Error) {
+        pendingApplicationReapplies.removeAll()
+        let status = (error as? AudioFailure)?.status
+        let recoverable = status == kAudioHardwareUnknownPropertyError || status == HAL.badObjectStatus
+        let message = "音频进程读取失败：\(error.localizedDescription)"
+        for key in Array(mixStates.keys) where mixStates[key]?.managed == true {
+            guard let state = mixStates[key] else { continue }
+            if state.failure == nil {
+                if recoverable, let session = sessions[key], session.mode == .mixing,
+                   !session.group.bundleID.isEmpty, cleanupErrors[key] == nil {
+                    processReadRecoveries[key] = ProcessReadRecovery(
+                        sessionID: ObjectIdentifier(session), group: session.group,
+                        route: session.playbackRoute, storedRoute: applicationAudioRoute(for: key))
+                    mixStates[key]?.markProcessReadFailure(message)
+                    diagnosticEventLog.record(category: "applicationFailure", message: "\(key): \(message)")
+                } else { latchApplicationFailure(message, for: key) }
+            } else if case .processRead = state.failureReason {
+                if !recoverable { latchApplicationFailure(message, for: key) }
+                // 同一次观察故障持续多久都不替换原凭据，也不覆盖后来出现的其他失败。
+            }
+        }
+        for key in Array(sessions.keys) where cleanupErrors[key] == nil {
+            _ = preserveMixingSession(key)
+        }
+    }
+
+    /// 必须同时读回进程与确认路由；只清掉当前会话自己的只读故障，不重建 tap。
+    private func recoverProcessReadFailures() {
+        guard audio != nil, audioCaptureAccess.allowsApplicationAudio,
+              !isFineTuneRunning, !outputRouting.phase.isBusy, outputRouting.phase != .failed,
+              let confirmed = outputRouting.confirmed else { return }
+        for (key, recovery) in processReadRecoveries {
+            guard case .processRead = mixStates[key]?.failureReason else {
+                processReadRecoveries.removeValue(forKey: key)
+                continue
+            }
+            guard cleanupErrors[key] == nil,
+                  let app = applications.first(where: { $0.id == key }), let group = app.group,
+                  group.id == recovery.group.id, group.bundleID == recovery.group.bundleID,
+                  Set(group.objectIDs) == Set(recovery.group.objectIDs),
+                  let session = sessions[key], ObjectIdentifier(session) == recovery.sessionID,
+                  session.isSuspendedForOutputChange, !session.isActive,
+                  confirmed.output.uid == recovery.route.sourceOutputUID,
+                  applicationAudioRoute(for: key) == recovery.storedRoute,
+                  !effectiveApplicationAudioRoute(for: key).isWaitingForDevices,
+                  let expected = try? applicationPlaybackRoute(for: confirmed.output, appID: key)
+                        ?? .single(confirmed.output),
+                  expected == recovery.route else { continue }
+            mixStates[key]?.recoverProcessReadFailure()
+            processReadRecoveries.removeValue(forKey: key)
+            sessionRouteWaitSince.removeValue(forKey: key)
+            diagnosticEventLog.record(category: "applicationRecovery", message: "\(key): process observation recovered")
+        }
+    }
+
     private func pauseManagedApplications(_ reason: String) {
+        processReadRecoveries.removeAll()
         // 进程读取、休眠等新失效撤销旧的重试授权，不能在确认后把后来发生的真实错误清掉。
         pendingApplicationReapplies.removeAll()
         for key in Array(mixStates.keys) where mixStates[key]?.managed == true {
@@ -1041,6 +1119,7 @@ final class AppModel: ObservableObject {
     }
 
     private func reconcile(_ app: ApplicationAudioRow) {
+        guard !isShutdown, !isShuttingDown else { return }
         guard audioCaptureAccess.allowsApplicationAudio else { return }
         guard var state = mixStates[app.id], cleanupErrors[app.id] == nil else { return }
         guard audio != nil, !outputRouting.phase.isBusy, outputRouting.phase != .failed,
@@ -1253,7 +1332,7 @@ final class AppModel: ObservableObject {
     }
 
     private func refreshMeters() {
-        guard metersVisible, !isShutdown else { return }
+        guard metersVisible, !isShutdown, !isShuttingDown else { return }
         let now = ProcessInfo.processInfo.systemUptime
         var activeIDs: Set<String> = []
         for app in playingApplications {
@@ -1282,6 +1361,7 @@ final class AppModel: ObservableObject {
     }
 
     private func requestOutput(_ intent: OutputRoutingIntent) {
+        guard !isShutdown, !isShuttingDown else { return }
         // 新的设备选择取代先前尚未完成的 APP 恢复操作，不能在另一路由上偷偷清除权限错误。
         pendingApplicationReapplies.removeAll()
         diagnosticEventLog.record(category: "routingRequest",
@@ -1317,7 +1397,10 @@ final class AppModel: ObservableObject {
 
     func dismissSimultaneousOutputError() { routing.dismissError(); refresh() }
 
-    func stopSimultaneousOutput() { routing.stop(at: routingNow); refresh() }
+    func stopSimultaneousOutput() {
+        guard !isShutdown, !isShuttingDown else { return }
+        routing.stop(at: routingNow); refresh()
+    }
 
     /// 这些状态只来自用户在本界面发起的路由切换。
     /// 先把 APP 绑定迁移到新输出，再刷新，不能把主动切换误报成外部设备变化。
@@ -1350,7 +1433,7 @@ final class AppModel: ObservableObject {
         guard audio?.outputs.contains(where: { $0.id == id }) == true else {
             operationError = "所选输出设备已断开，请刷新。"; return
         }
-        do { try SystemAudio.setMute(muted, on: id); operationError = nil }
+        do { try outputHardware.setMute(muted, id); operationError = nil }
         catch { operationError = error.localizedDescription }
         refreshAudio()
     }
@@ -1397,7 +1480,7 @@ final class AppModel: ObservableObject {
             return
         }
         do {
-            for output in outputs { try SystemAudio.setMute(muted, on: output.id) }
+            for output in outputs { try outputHardware.setMute(muted, output.id) }
             operationError = nil
         } catch {
             operationError = error.localizedDescription
@@ -1556,6 +1639,7 @@ final class AppModel: ObservableObject {
     }
 
     private func latchApplicationFailure(_ message: String, for key: String) {
+        processReadRecoveries.removeValue(forKey: key)
         pendingApplicationReapplies.removeValue(forKey: key)
         guard mixStates[key]?.failure != message else { return }
         // 只记录本机错误元数据，不记录音频。下次可直接读取确切失败，不再只靠截图中的红点猜测。
@@ -1641,6 +1725,7 @@ final class AppModel: ObservableObject {
 
     @discardableResult
     func stop(_ key: String) -> Bool {
+        processReadRecoveries.removeValue(forKey: key)
         guard let session = sessions[key] else { return true }
         do {
             try session.stop(); sessions.removeValue(forKey: key); cleanupErrors.removeValue(forKey: key)
@@ -1660,21 +1745,51 @@ final class AppModel: ObservableObject {
     }
 
     func shutdown() -> Bool {
-        guard stopAll() else { return false }
-        if routing.retainedRoute != nil || !outputRouting.pendingCleanup.isEmpty {
-            routing.stop(at: routingNow)
-            refreshAudio()
-            guard !outputRouting.phase.isBusy, outputRouting.phase != .failed,
-                  routing.retainedRoute == nil, outputRouting.pendingCleanup.isEmpty else { return false }
+        shutdownStep() == .complete
+    }
+
+    func cancelShutdown() {
+        guard !isShutdown else { return }
+        lifecycle = .running
+        shutdownRouteRequested = false
+        diagnosticEventLog.record(category: "lifecycle", message: "shutdown cancelled")
+        // 保留未释放的会话和真实错误，恢复只读观察，不自动清错或重建失败的处理链。
+        refresh()
+    }
+
+    /// 退出期间只推进释放，不走 refreshAudio 的重绑定和会话恢复路径。
+    func shutdownStep() -> ApplicationShutdownResult {
+        if isShutdown { return .complete }
+        lifecycle = .stopping
+        routing.discardQueuedRequestForShutdown()
+        pendingApplicationReapplies.removeAll()
+        processReadRecoveries.removeAll()
+        guard stopAll() else {
+            return .failed(cleanupErrors.keys.sorted().compactMap { cleanupErrors[$0] }.joined(separator: "；"))
+        }
+        if routing.retainedRoute != nil || !outputRouting.pendingCleanup.isEmpty || outputRouting.phase.isBusy {
+            if !shutdownRouteRequested, !outputRouting.phase.isBusy {
+                shutdownRouteRequested = true
+                routing.stop(at: routingNow)
+            }
+            do { routing.observe(try outputHardware.snapshot(), at: routingNow) }
+            catch { return .failed(error.localizedDescription) }
+            if outputRouting.phase == .failed {
+                return .failed(outputRouting.error ?? "音频组合未能释放。")
+            }
+            if outputRouting.phase.isBusy { return .waiting }
+            // 退出开始前已有切换在进行，必须等它结束后再发出唯一一次退出释放请求。
+            if routing.retainedRoute != nil || !outputRouting.pendingCleanup.isEmpty { return .waiting }
         }
         routeConfirmationTimer?.invalidate(); routeConfirmationTimer = nil
-        isShutdown = true; headphones.shutdown()
+        lifecycle = .stopped; headphones.shutdown()
         timer?.invalidate(); timer = nil
         meterTimer?.invalidate(); meterTimer = nil
         removeOutputRouteListener()
         if let sleepObserver { NSWorkspace.shared.notificationCenter.removeObserver(sleepObserver) }
         if let wakeObserver { NSWorkspace.shared.notificationCenter.removeObserver(wakeObserver) }
         if let activationObserver { NotificationCenter.default.removeObserver(activationObserver) }
-        return true
+        diagnosticEventLog.record(category: "lifecycle", message: "shutdown completed")
+        return .complete
     }
 }

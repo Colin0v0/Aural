@@ -29,6 +29,10 @@ final class RoutingTestHardware {
     var activePlayback: [AudioDeviceID] = []
     var compositions: [AudioDeviceID: [String: Any]] = [:]
     var selections: [AudioDeviceID] = []
+    var muteWrites: [(Bool, AudioDeviceID)] = []
+    var mutedIDs: Set<AudioDeviceID> = []
+    var failMute = false
+    var beforeMute: ((AudioDeviceID) -> Void)?
     var destroyed: [AudioDeviceID] = []
     var created: [AudioDeviceID] = []
     private var nextID: AudioDeviceID = 100
@@ -40,7 +44,12 @@ final class RoutingTestHardware {
                 all.append(AudioOutput(id: id, uid: uid, name: "测试组合", transport: kAudioDeviceTransportTypeAggregate))
             }
         }
-        return SystemAudioSnapshot(outputs: all, selectedID: selected, controls: [:])
+        let controls = Dictionary(uniqueKeysWithValues: all.map { output in
+            (output.id, AudioDeviceControlState.available(
+                volume: AudioDeviceVolume(scalar: 0.5, writable: true),
+                mute: AudioDeviceMute(muted: mutedIDs.contains(output.id), writable: true)))
+        })
+        return SystemAudioSnapshot(outputs: all, selectedID: selected, controls: controls)
     }
 
     func commitSelection() {
@@ -90,6 +99,11 @@ final class RoutingTestHardware {
                 self.destroyed.append(id)
                 if !self.keepAfterDestroy { self.compositions.removeValue(forKey: id) }
                 self.afterDestroy?(id)
+            }, setMute: { muted, id in
+                self.beforeMute?(id)
+                if self.failMute { throw AudioFailure("注入：设备静音失败") }
+                self.muteWrites.append((muted, id))
+                if muted { self.mutedIDs.insert(id) } else { self.mutedIDs.remove(id) }
             })
     }
 }

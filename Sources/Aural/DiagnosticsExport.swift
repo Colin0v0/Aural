@@ -163,6 +163,7 @@ struct DiagnosticMixState: Codable, Equatable {
 }
 
 struct DiagnosticApplicationSessionState: Codable, Equatable {
+    let resources: AudioSessionResourceSnapshot?
     let mode: String
     let output: DiagnosticDeviceRef
     let sourceOutputUID: String
@@ -413,6 +414,7 @@ extension AppModel {
             storedEffect: storageKey.flatMap { appAudioEffects[$0] },
             session: session.map {
                 DiagnosticApplicationSessionState(
+                    resources: ($0 as? ProcessAudioSession)?.resourceSnapshot,
                     mode: $0.mode.diagnosticDescription,
                     output: DiagnosticDeviceRef(id: $0.output.id, uid: $0.output.uid, name: $0.output.name),
                     sourceOutputUID: $0.playbackRoute.sourceOutputUID,

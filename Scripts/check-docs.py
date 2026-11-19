@@ -11,7 +11,7 @@ import xml.etree.ElementTree as ET
 ROOT = Path(__file__).resolve().parent.parent
 DOCUMENTS = ["README.md", "README.zh-CN.md", "docs/TRUST_AND_TESTING.md",
              "docs/images/README.md", "docs/DEVELOPMENT.md", "docs/RELEASING.md",
-             "docs/audio-capture-permission.md"]
+             "docs/audio-capture-permission.md", "docs/AUDIO_LIFECYCLE.md"]
 
 
 class Links(HTMLParser):

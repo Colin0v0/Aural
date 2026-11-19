@@ -96,6 +96,9 @@ public final class OutputRoutingController {
     public private(set) var latestSnapshot: SystemAudioSnapshot?
     public var didChange: ((OutputRoutingState) -> Void)?
     public var beforeChanging: (() throws -> Void)?
+    /// 只有意外接替、且不在已选范围内的真实输出才静音；选中范围内的剩余成员正常续播。
+    public var beforeAdoptingUnexpectedOutput: ((AudioOutput) throws -> Void)?
+    private var protectedUnexpectedOutputUID: String?
     /// APP 接管后声音由本进程重放；只要仍有活动会话在已确认路由，就属于真实播放事实。
     public var localPlaybackOnConfirmedRoute: (() -> Bool)?
     /// 用户正在控制中心或声音设置里明确选择输出时，外部变化属于用户意图，不能抢回。
@@ -149,6 +152,11 @@ public final class OutputRoutingController {
         performRequest(intent, at: now, updatesConfiguration: true)
     }
 
+    /// 退出撤销尚未开始的选择；正在进行的 HAL 操作仍须沿原阶段读回和释放，不能中途遗失句柄。
+    public func discardQueuedRequestForShutdown() {
+        state.queued = nil
+    }
+
     /// 同一条切换链同时处理显式勾选和已选成员的上下线；自动调整不覆盖用户原始勾选。
     private func performRequest(_ intent: OutputRoutingIntent, at now: Date,
                                 updatesConfiguration: Bool) {
@@ -160,6 +168,7 @@ public final class OutputRoutingController {
             resources.recordUnmanagedOutputs(in: snapshot)
             try validateIntent(intent, snapshot: snapshot)
             if updatesConfiguration {
+                protectedUnexpectedOutputUID = nil
                 state.configured = intent
                 state.configuredOutputs = intent.memberUIDs.compactMap { uid in snapshot.outputs.first { $0.uid == uid } }
                 state.unavailableMemberUIDs = []
@@ -315,6 +324,7 @@ public final class OutputRoutingController {
                 }
                 let sameMediaOutput = selectedOutput?.uid == confirmed.output.uid
                 if sameMediaOutput {
+                    protectedUnexpectedOutputUID = nil
                     externalAdoptionDeadline = nil
                     routeHandleSettleDeadline = nil
                     if confirmed.aggregate == nil, let old = resources.route, systemSelected != old.deviceID {
@@ -353,9 +363,12 @@ public final class OutputRoutingController {
                     let knownIDs = Set(snapshot.outputs.map(\.id)).union(routeIDs)
                     let reportedIDs = try hardware.activePlaybackDeviceIDs()
                     let activeIDs = reportedIDs.filter { knownIDs.contains($0) }
-                    let localPlayback = localPlaybackOnConfirmedRoute?() == true
+                    // 失效句柄和残留的进程报告不能证明旧路由仍在播放，也不能授权抢回旧输出。
+                    let confirmedAvailable = try snapshot.outputs.contains(where: { $0.id == confirmed.output.id })
+                        && hardware.isAlive(confirmed.output.id)
+                    let localPlayback = confirmedAvailable && (localPlaybackOnConfirmedRoute?() == true)
                     let userSelecting = isUserSelectingOutput?() == true
-                    if !userSelecting, !localPlayback, !reportedIDs.isEmpty, activeIDs.isEmpty,
+                    if confirmedAvailable, !userSelecting, !localPlayback, !reportedIDs.isEmpty, activeIDs.isEmpty,
                        reportedIDs.allSatisfy({ !presentIDs.contains($0) }) {
                         // 进程仍指着已经不在枚举中的旧句柄：先等 HAL 完成换号，不能把换号当成外部切换。
                         if routeHandleSettleDeadline == nil {
@@ -367,7 +380,7 @@ public final class OutputRoutingController {
                         }
                     }
                     routeHandleSettleDeadline = nil
-                    if !userSelecting,
+                    if confirmedAvailable, !userSelecting,
                        localPlayback || (!activeIDs.isEmpty && !Set(activeIDs).isDisjoint(with: routeIDs)) {
                         // Apple 耳机接入时可能只改写默认输出；真实进程仍播放原路由时恢复默认，不动会话。
                         switch preemption.decide(stealingUID: selectedOutput?.uid ?? "", at: now) {
@@ -406,6 +419,14 @@ public final class OutputRoutingController {
                         throw AudioFailure("当前媒体输出不可用或不支持 APP 接管")
                     }
                     externalAdoptionDeadline = nil
+                    // 设置窗口恰好在前台并不能证明用户主动切换；旧设备已离线时仍需保护。
+                    if !userSelecting || !confirmedAvailable,
+                       try protectUnexpectedOutput(actual, allowedUIDs: state.configured?.memberUIDs
+                                                   ?? confirmed.intent.memberUIDs) {
+                        // 静音成功后重新读取同一 HAL 快照，界面不能再展示写入前的未静音状态。
+                        observe(try hardware.snapshot(), at: now)
+                        return
+                    }
                     let systemOutput = snapshot.outputs.first { $0.id == systemSelected }
                     if systemOutput?.isAuralMultiOutput == true {
                         // 上一轮 Aural 组合仍占着提示音，复用显式单设备切换把两条默认输出和资源一起收尾。
@@ -507,6 +528,18 @@ public final class OutputRoutingController {
             state.completedSteps.append("已请求目标输出")
         }
         state.phase = .awaitingHAL
+    }
+
+    /// 同一接替设备只处理一次，用户手动取消静音后不能每次轮询又静音它。
+    /// 不自动解除静音，重连、重建组和启动新会话也没有取消静音的权限。
+    private func protectUnexpectedOutput(_ output: AudioOutput, allowedUIDs: [String]) throws -> Bool {
+        guard !allowedUIDs.contains(output.uid),
+              protectedUnexpectedOutputUID != output.uid,
+              let beforeAdoptingUnexpectedOutput else { return false }
+        try beforeAdoptingUnexpectedOutput(output)
+        protectedUnexpectedOutputUID = output.uid
+        state.completedSteps.append("已静音意外接替的输出")
+        return true
     }
 
     private func member(_ uid: String, in snapshot: SystemAudioSnapshot) throws -> AudioOutput {
@@ -618,7 +651,8 @@ public final class OutputRoutingController {
         }
         state.unavailableMemberUIDs = unavailable
         if (!unavailable.isEmpty || state.phase == .awaitingMembers
-            || available != state.confirmed?.intent.memberUIDs), isUserSelectingOutput?() == true,
+            || available != state.confirmed?.intent.memberUIDs), !available.isEmpty,
+           isUserSelectingOutput?() == true,
            let actual = state.actualOutput, !actual.isAggregate,
            actual.id != state.confirmed?.output.id, try hardware.isAlive(actual.id) {
             // 系统界面的明确选择仍优先；不因保留了旧勾选而反复改回组合。
@@ -636,10 +670,25 @@ public final class OutputRoutingController {
                 preemption.reset()
                 warningDeviceUID = nil
             }
+            if let actual = state.actualOutput, !actual.isAggregate, try hardware.isAlive(actual.id) {
+                if try protectUnexpectedOutput(actual, allowedUIDs: configured.memberUIDs) {
+                    observe(try hardware.snapshot(), at: now)
+                    return true
+                }
+            }
             updateCleanup(snapshot)
             return true
         }
         if state.phase == .awaitingMembers || available != state.confirmed?.intent.memberUIDs {
+            if let actual = state.actualOutput, !actual.isAggregate,
+               !configured.memberUIDs.contains(actual.uid), try hardware.isAlive(actual.id) {
+                // 即使仍有合法成员，也先静音系统临时选中的组外出口；合法成员本身绝不静音。
+                try beforeChanging?()
+                if try protectUnexpectedOutput(actual, allowedUIDs: configured.memberUIDs) {
+                    observe(try hardware.snapshot(), at: now)
+                    return true
+                }
+            }
             // 沿用正常资源释放/创建/读回确认，不再在旧组合上反复抢默认输出。
             performRequest(.simultaneous(available), at: now, updatesConfiguration: false)
             return true
