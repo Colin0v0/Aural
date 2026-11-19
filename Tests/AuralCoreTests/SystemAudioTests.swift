@@ -44,8 +44,8 @@ struct SystemAudioTests {
         }
     }
 
-    @Test func emptyWrapperErrorStillCarriesOperationAndCoreAudioStatus() {
-        // AudioHardwareTap 的错误描述可能为空；状态码必须保留，界面不能只显示“Chrome：”。
+    @Test func emptyOSStatusErrorStillCarriesOperationAndCoreAudioStatus() {
+        // 状态码直接来自 C API，不读取仅在新 SDK 中存在的 Swift 包装字段。
         let error = NSError(domain: NSOSStatusErrorDomain, code: Int(HAL.badDeviceStatus),
                             userInfo: [NSLocalizedDescriptionKey: "   "])
         let failure = HAL.operationFailure(error, operation: "更新应用静音捕获")

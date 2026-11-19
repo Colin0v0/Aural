@@ -45,8 +45,8 @@ public enum HAL {
         status == badObjectStatus || status == badDeviceStatus
     }
 
-    /// `AudioHardwareTap` 等 Swift 包装层可能给出空 `localizedDescription`。
-    /// 错误必须保留操作名和 OSStatus，不能在界面上只剩 `com.google.Chrome：`。
+    /// 错误统一保留操作名和 OSStatus，不依赖不同 SDK 中 Swift 音频错误包装类型的字段。
+    /// 空描述也必须可诊断，不能在界面上只剩 `com.google.Chrome：`。
     static func operationFailure(_ error: Error, operation: String) -> AudioFailure {
         if let failure = error as? AudioFailure, !failure.message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             return failure
@@ -55,8 +55,6 @@ public enum HAL {
         let status: OSStatus?
         if let failure = error as? AudioFailure {
             status = failure.status
-        } else if let hardware = error as? AudioHardwareError {
-            status = hardware.error
         } else if nsError.domain == NSOSStatusErrorDomain {
             status = OSStatus(nsError.code)
         } else {
@@ -168,13 +166,14 @@ public enum HAL {
         }
     }
 
-    public static func write<T>(_ object: AudioObjectID, _ address: AudioObjectPropertyAddress, value: T) throws {
+    public static func write<T>(_ object: AudioObjectID, _ address: AudioObjectPropertyAddress, value: T,
+                                operation: String = "写入音频属性") throws {
         var address = address
         var value = value
         let status = withUnsafePointer(to: &value) {
             AudioObjectSetPropertyData(object, &address, 0, nil, UInt32(MemoryLayout<T>.size), $0)
         }
-        try check(status, "写入音频属性")
+        try check(status, operation)
     }
 }
 

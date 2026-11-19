@@ -38,7 +38,11 @@ struct ProcessAudioHardware {
             var tapID: AudioObjectID = 0
             try HAL.check(AudioHardwareCreateProcessTap(description, &tapID), "创建应用音频捕获")
             return tapID
-        }, updateTap: { try AudioHardwareTap(id: $0).setDescription($1) }, tapFormat: {
+        }, updateTap: { tapID, description in
+            // 所有支持系统统一使用公开的 C 属性接口，直接保留 OSStatus；不依赖 SDK 版本不同的 Swift 包装字段。
+            try HAL.write(tapID, HAL.address(kAudioTapPropertyDescription), value: description,
+                          operation: "更新应用静音捕获")
+        }, tapFormat: {
             try HAL.read($0, HAL.address(kAudioTapPropertyFormat), initial: AudioStreamBasicDescription())
         }, createAggregate: { description in
             var deviceID: AudioDeviceID = 0

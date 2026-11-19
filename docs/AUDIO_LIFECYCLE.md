@@ -7,6 +7,8 @@
 - `ProcessAudioHardware`：HAL 调用边界。生产使用真实 API，测试只替换这些调用，执行相同会话代码。
 - `ApplicationTermination`：区分退出完成、等待系统确认和真实失败。单调时钟限定三秒等待，不延长期限。
 
+tap 描述更新统一写入公开的 `kAudioTapPropertyDescription` 属性，直接检查 C API 返回的 OSStatus；不依赖新版 SDK 才有的 Swift 错误包装字段，也不按系统版本选择其他实现。
+
 ## 资源状态
 
 重放端只允许以下状态：
