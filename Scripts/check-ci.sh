@@ -2,6 +2,9 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
+# 产品文档必须能随仓库发布：不接受本地存在、却被忽略的配图或文档链接。
+python3 ./Scripts/check-docs.py
+
 # CI 托管 runner 没有真实音频硬件，不能把本机设备诊断当作发布门禁。
 # 发布构建仍执行完整单元测试、Release 构建和严格签名校验；硬件诊断只在真机执行。
 TOOLCHAIN_USR="$(dirname "$(dirname "$(xcrun --find swiftc)")")"

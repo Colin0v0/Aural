@@ -1,118 +1,133 @@
 <p align="center">
-  <img src="Resources/AppIcon-1024.png" width="128" height="128" alt="Aural 应用图标" />
+  <img src="Resources/AppIcon-1024.png" width="96" height="96" alt="Aural 应用图标" />
 </p>
-
 <h1 align="center">Aural</h1>
-
 <p align="center"><strong>Your Mac. Your Sound. Your Rules.</strong></p>
+<p align="center">每个 App 的音量、输出路由与耳机控制，都在菜单栏。</p>
+<p align="center"><a href="README.md">English</a> · <strong>简体中文</strong></p>
+<p align="center">
+  <a href="https://github.com/Colin0v0/Aural/releases/latest"><img src="https://img.shields.io/github/v/release/Colin0v0/Aural" alt="最新版本" /></a>
+  <img src="https://img.shields.io/badge/macOS-15.4%2B-000000?logo=apple&amp;logoColor=white" alt="macOS 15.4 或更新版本" />
+  <img src="https://img.shields.io/badge/Apple_Silicon-arm64-555555" alt="Apple Silicon arm64" />
+  <a href="https://github.com/Colin0v0/Aural/actions/workflows/release.yml"><img src="https://github.com/Colin0v0/Aural/actions/workflows/release.yml/badge.svg?branch=main" alt="发布检查状态" /></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue" alt="MIT 许可证" /></a>
+</p>
+<p align="center">
+  <a href="https://github.com/Colin0v0/Aural/releases/latest"><strong>下载 Apple Silicon 版本</strong></a> ·
+  <a href="#兼容性与安装">安装前须知</a> ·
+  <a href="docs/CHANGELOG.md">更新记录</a>
+</p>
+<p align="center">
+  <a href="docs/images/hero-zh.png"><img src="docs/images/hero-zh.png" width="440" alt="Aural 主面板：扬声器、耳机、多设备输出，以及 Chrome 和 Music 的独立音量与路由按钮" /></a>
+</p>
+<p align="center"><sub>界面预览由 Aural 0.3.9 使用示例设备和应用数据渲染，并非实时音频会话。<a href="docs/images/README.md">图片来源</a>。</sub></p>
+
+> 免费、开源，无需账号。当前下载包使用 ad-hoc 签名，**尚未经过 Apple 公证**，macOS 可能阻止启动。[分发与权限说明](docs/TRUST_AND_TESTING.md#中文说明)。
+
+## 为什么用 Aural？
+
+**把浏览器调小，不必连音乐一起调小。** Aural 把各个 App 的音量和输出选择放进一个菜单栏面板，不用在播放器和系统声音设置之间来回找。
+
+先用音量和静音就好。需要时，再到设置里开启多设备输出、应用音效或耳机控制；这三项默认关闭。
+
+## 四个核心功能
+
+<table>
+<tr>
+<td width="50%" valign="top">
+<h3>每个 App，单独调节</h3>
+<p>给 Chrome 和 Music 设置不同音量，单独静音；面板打开时可查看实时电平。</p>
+<a href="docs/images/mixer-zh.png"><img src="docs/images/mixer-zh.png" width="440" alt="Chrome 与 Music 的独立音量滑杆、音效和路由入口" /></a>
+</td>
+<td width="50%" valign="top">
+<h3>一个输出组，多种去向</h3>
+<p>把扬声器和耳机加入同一组，保留各设备的独立控制，再为每个 App 选择组内输出。</p>
+<a href="docs/images/outputs-zh.png"><img src="docs/images/outputs-zh.png" width="440" alt="多设备输出编辑器中同时勾选 MacBook 扬声器与 AirPods Pro" /></a>
+</td>
+</tr>
+<tr>
+<td width="50%" valign="top">
+<h3>按 App 调整听感</h3>
+<p>十段 EQ、空间效果、音量均衡与声道控制。保存自己的预设，也能随时对比原声。</p>
+<a href="docs/images/effects-zh.png"><img src="docs/images/effects-zh.png" width="440" alt="Music 音效窗口：十段均衡器、频响预览与对比原声按钮" /></a>
+</td>
+<td width="50%" valign="top">
+<h3>耳机控制，抬手就到</h3>
+<p>查看电量、切换当前型号公开的噪声模式。可用控制项取决于具体设备和固件。</p>
+<a href="docs/images/headphones-zh.png"><img src="docs/images/headphones-zh.png" width="440" alt="耳机控制示例：左右耳与充电盒电量、降噪、通透和自适应模式" /></a>
+</td>
+</tr>
+</table>
+
+## 怎么用：浏览器走扬声器，音乐走耳机
+
+两台设备都在线时，可以这样配置：
 
 <p align="center">
-  <a href="README.md">English</a> · <strong>简体中文</strong>
+  <img src="docs/images/routing-zh.svg" width="820" alt="路由示意：Chrome 经 Aural 输出到扬声器，Music 经 Aural 输出到耳机，两台设备属于同一个输出组" />
 </p>
 
-<p align="center">
-  <img src="https://img.shields.io/badge/macOS-15.4%2B-000000?logo=apple&logoColor=white" alt="macOS 15.4 或更新版本" />
-  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue" alt="MIT License" /></a>
-</p>
+1. 在设置里开启 **显示多设备输出**。
+2. 将扬声器和耳机加入输出组。
+3. 在两个 App 中开始播放。分别打开它们的路由菜单，选择自定义输出：Chrome 选扬声器，Music 选耳机。
 
-<p align="center">
-  <a href="https://github.com/Colin0v0/Aural/releases"><strong>下载最新版本</strong></a>
-  ·
-  <a href="docs/HEADPHONE_COMPATIBILITY.md">耳机兼容性</a>
-</p>
+也可以选择 **全部输出**，让这个 App 跟随整个组。应用路由的选择范围是当前输出组，不是任意未连接设备。上图是配置示意，不是真机发声或延迟测试结果。
 
-Aural 把 Mac 的声音控制收进菜单栏：切换设备、给每个 App 单独调音量、让声音同时从多个输出播放，也能查看耳机电量、切换降噪。想调整某个 App 的声音，打开它的「音效」窗口就好。
+> **自定义路由不等于系统级隐私隔离。** 0.3.9 在所选目标全部不可用时，暂停该应用的 Aural 重放并保留静音捕获，不改用组内其他输出；播放器进度不会因此暂停。退出 Aural、撤销权限及全部真机切换场景不在此保证范围内。0.3.8 等旧版仍可能使用组内其他输出。[行为与限制](docs/TRUST_AND_TESTING.md#中文说明)。
 
-> **当前版本：0.3.8**
->
-> Aural 目前直接分发，尚未经过 Apple 公证；首次打开时 macOS 可能要求确认。
+## 兼容性与安装
 
-## 你可以用它做什么
+| 安装前确认 | 当前范围 |
+| --- | --- |
+| Mac | Apple Silicon，**macOS 15.4 或更新版本**。目前不提供 Intel 发布包。 |
+| 耳机 | 已实现部分 **Apple / Beats、Bowers & Wilkins、Sony、OPPO、Bose、Sennheiser** 型号的控制；不代表这些品牌全系兼容。 |
+| 验证状态 | 许多型号仍标为 **上游已验证** 或 **实验性**，不能等同于 Aural 独立真机验收。详见[逐型号兼容表](docs/HEADPHONE_COMPATIBILITY.md)。 |
+| 权限 | 系统音频录制权限用于应用音频处理，蓝牙权限用于耳机控制；麦克风页只调节硬件设置，不录制麦克风。 |
 
-- **快速切换音频** — 从菜单栏直接选择输出或麦克风。
-- **单独调节 App** — 为每个正在播放的 App 设置独立音量、静音状态和实时电平。
-- **使用多设备输出** — 让系统声音同时从多个扬声器或耳机播放。
-- **为 App 指定输出** — 让音乐留在耳机，把浏览器声音放到扬声器。
-- **调整 App 音效** — 在独立窗口使用 10 段 EQ 推子、频响预览、自定义预设和原声对比，不改变原音量与输出路由。
-- **控制兼容耳机** — 查看电量、切换噪声模式，并在一个面板里管理多副耳机。
-- **按自己的方式使用** — 支持中文和英文、跟随系统外观，并按需开启功能。
+### 安装
 
-应用音效、耳机控制与多设备输出默认关闭，可以在设置中按需开启。
+1. 从 [GitHub Releases](https://github.com/Colin0v0/Aural/releases/latest) 下载 arm64 DMG。
+2. 打开安装包，将 Aural 拖入 **应用程序**。替换前先退出仍在运行的旧版本。
+3. 启动后按系统提示授权。当前启动流程需要系统音频录制权限才能进入主界面。
+4. 在任意 App 中播放音频，再点击菜单栏的 Aural；可选功能在设置中开启。
 
-## 多设备输出与应用路由
+发布页提供 SHA-256 校验文件。当前包为 ad-hoc 签名，尚无 Developer ID 签名及 Apple 公证。请遵循 macOS 的安全提示，项目不要求关闭 Gatekeeper 或 SIP。
 
-开启 **显示多设备输出** 后，选择两个或更多输出设备，Aural 会把它们作为一个多设备输出组使用。每台设备仍保留自己的音量和静音控制。
+### 使用前请了解
 
-每个正在播放的 App 可以选择：
+- 切换输出可能短暂断音。不同蓝牙设备的延迟可能不同，多设备输出不保证各设备严格同步。
+- 休眠、断连或处理失败后，部分应用可能需要 **重新应用**。在公共场合使用前，请先把设备音量调低，验证自己的重连流程。
+- 应用处理不支持部分受保护音频、第三方聚合设备及部分双工、多流音频接口；当前 PCM 路径支持原生 Float32 单声道或双声道。
+- 自动测试覆盖状态变化与合成音频，**不代表所有真机组合、长时间播放或漏音场景均已验收**。[测试范围与真机清单](docs/TRUST_AND_TESTING.md#中文说明)。
 
-- **全部输出** — 跟随当前多设备输出组，之后加入的设备也会自动包含。
-- **自定义输出** — 只从这个 App 选择的设备播放。
+## 技术细节
 
-修改一个 App 的路由不会影响其他 App 或系统整体输出。Aural 会保存自定义路由，并在设备重新连接后恢复；设备加入或离开多设备组时，路由会自动按当前设备集合重新计算。
+### 音频留在本机，诊断由你分享
 
-## 应用音效
+Aural 在本机处理音频，不保存录音、不上传音频，无需账号，也不收集遥测。应用会访问 GitHub 检查更新和下载新版本。
 
-从 App 行打开「音效」窗口：先选一个内置预设，保存当前配置，或用十段推子调整声音。选中自定义预设后，顶部会出现重命名和删除；「对比原声」用于快速听调整前后的差别。
+遇到问题时，可在 **设置 → 诊断 → 导出诊断报告…** 保存 JSON。报告在主动分享前只保留在本机，包含当前音频状态与近期内存事件，不含音频样本。设备名称、UID、蓝牙地址及应用身份可能出现在其中，公开前请先检查并移除私人信息。
 
-音效按 App 记住，不改变原来的音量、静音和输出路由。功能可在设置中开启。
+### 构建与检查
 
-## 当前支持的耳机
-
-连接耳机后，Aural 只显示耳机实际提供的控制项。可用功能会因型号、固件和 macOS 版本而不同。
-
-| 耳机型号 | 可查看 / 控制 | 状态 |
-| --- | --- | --- |
-| Bowers & Wilkins Px7 S3 / Px8 | 电量，关闭、降噪、通透 | 上游已验证 |
-| Bowers & Wilkins Px7 S2 / Pi5 / Pi6 / Pi7 / Pi8 | 电量，关闭、降噪、通透 | 实验性 |
-| Sony WH-1000XM3 | 电量，关闭、降噪、通透，设备支持时可显示抗风噪 | 上游已验证 |
-| Sony WH-1000XM5 / ULT WEAR | 电量，关闭、降噪、通透 | 上游已验证 |
-| Sony WH-1000XM2 / XM4 / XM6、WH-CH720N、WF-1000XM3 / XM4 / XM5 / XM6、LinkBuds S、WF-SP800N、WI-SP600N、MDR-1000X | 确认匹配 Sony V1 或 V2 服务后显示控制 | 实验性 |
-| OPPO Enco Air5s | 电量，关闭、降噪、通透 | 上游已验证 |
-| AirPods / Beats（包括 AirPods Max） | 关闭，以及 macOS 公开的降噪、通透和自适应模式 | 取决于系统 |
-| Bose QuietComfort Ultra Headphones (2nd Gen) / QuietComfort Headphones | 电量，Quiet、Aware | 上游已验证 |
-| Bose QuietComfort Ultra Earbuds (2nd Gen) | 左耳、右耳和充电盒电量，Quiet、Aware | 上游已验证 |
-| Bose QuietComfort 45 | 完成产品初始化后查看电量，切换 Quiet、Aware | 实验性 |
-| Sennheiser ACCENTUM Wireless | 电量，关闭、降噪、通透 | 上游已验证 |
-
-**上游已验证** 表示对应协议已在上游项目中用同型号设备测试过，Aural 仍需要独立硬件验收。**实验性** 表示型号已被识别，但当前版本尚未在对应真机上完成验证。
-
-完整的协议依据、待研究型号和社区测试要求见 [耳机兼容性说明](docs/HEADPHONE_COMPATIBILITY.md)。
-
-## 安装
-
-1. 从 [GitHub Releases](https://github.com/Colin0v0/Aural/releases) 下载最新版本。
-2. 打开 DMG，将 Aural 拖入“应用程序”文件夹。
-3. 启动 Aural，按提示允许蓝牙或 App 音频权限。
-
-Aural 需要 **macOS 15.4 或更新版本**，目前面向 **Apple Silicon Mac**。
-
-## 使用前请了解
-
-- 不同耳机公开的控制能力不同，固件更新也可能改变兼容性。
-- 切换输出时可能出现很短的音频间隙。
-- 同时使用多副蓝牙耳机时，延迟可能不同。
-- 休眠、断开连接或音频错误后，部分 App 可能需要重新应用路由。
-- 受保护音频和部分 App 的特殊音频方式可能无法处理。
-
-## 隐私
-
-Aural 只在本机处理音频，不保存录音、不上传音频、不需要账号，也不收集遥测数据。
-
-诊断信息可能包含设备名称、编号或蓝牙地址；分享前请删除不希望公开的信息。
-
-## 从源码构建
-
-需要 Swift 6 工具链和 macOS 15.4 或更新版本。
+需要 Swift 6 工具链和 macOS 15.4 或更新版本：
 
 ```sh
+git clone https://github.com/Colin0v0/Aural.git
+cd Aural
 ./Scripts/check.sh
 open dist/Aural.app
 ```
 
-脚本会运行测试、构建应用、验证本地签名，并生成 `dist/Aural.app`。
+`check.sh` 会运行测试、构建应用、验证本地签名，并在宿主 Mac 上读取输出和输入设备诊断。无需真实音频硬件的发布检查由 [GitHub Actions](https://github.com/Colin0v0/Aural/actions/workflows/release.yml) 执行。绿色 CI 表示这些检查通过，不代表 Apple 认证或全部硬件验收完成。
 
-第三方许可和致谢见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)，版本记录见 [docs/CHANGELOG.md](docs/CHANGELOG.md)。
+| 详细文档 | 内容 |
+| --- | --- |
+| [稳定性、限制与测试](docs/TRUST_AND_TESTING.md#中文说明) | 已知风险、验证边界与问题反馈方式 |
+| [耳机兼容性](docs/HEADPHONE_COMPATIBILITY.md) | 具体型号、协议证据及实验性支持 |
+| [开发与诊断](docs/DEVELOPMENT.md) | 源码结构、命令与本地构建 |
+| [音频权限实现](docs/audio-capture-permission.md) | 权限处理与非公开接口依赖 |
+| [发布清单](docs/RELEASING.md) · [更新日志](docs/CHANGELOG.md) | 打包要求与各版本修复记录 |
+| [第三方声明](THIRD_PARTY_NOTICES.md) · [MIT 许可证](LICENSE) | 代码来源与许可条款 |
 
-## 许可证
-
-Aural 采用 [MIT License](LICENSE)。
+发现问题，可以[提交 Issue](https://github.com/Colin0v0/Aural/issues/new?template=bug_report.yml)，附上版本、确切设备型号和复现步骤。上传诊断前先移除私人信息。以上界面预览的生成方式见[图片来源](docs/images/README.md)。

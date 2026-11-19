@@ -19,6 +19,10 @@ public protocol ApplicationAudioSession: AnyObject {
     func suspendForOutputChange() throws
     /// 同一应用的输出目标变化时保留现有 tap，只重建重放聚合，避免捕获静音出现空档。
     func switchOutput(to output: AudioOutput, playbackRoute: ApplicationPlaybackRoute) throws
+    /// 只建立无设备绑定的静音 tap，不创建重放聚合或 I/O 回调。
+    func startSuspended() throws
+    /// 同一应用的进程变化时更新同一 tap，避免 stop/start 暴露原声。
+    func updateProcesses(to group: AudioProcessGroup) throws
     func start() throws
     func checkHealth(expectingAudio: Bool) throws
     func stop() throws

@@ -495,6 +495,16 @@ private extension AppAudioRoute {
     }
 }
 
+private extension EffectiveAppAudioRoute {
+    var diagnosticDescription: String {
+        switch self {
+        case .allOutputs: return "allOutputs"
+        case .custom: return "custom"
+        case .waitingForDevices: return "waitingForDevices"
+        }
+    }
+}
+
 private extension ApplicationAudioMode {
     var diagnosticDescription: String {
         switch self {

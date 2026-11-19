@@ -13,6 +13,7 @@ struct ApplicationMixerRow: View {
     let audioEffect: AppAudioEffectSettings
     let routingEnabled: Bool
     let audioRoute: AppAudioRoute
+    let routePaused: Bool
     let routeOutputs: [AudioOutput]
     let toggleMute: () -> Void
     let setGain: (Float) -> Void
@@ -38,6 +39,7 @@ struct ApplicationMixerRow: View {
          updateAudioEffect: @escaping (AppAudioEffectSettings) -> Void = { _ in },
          openApplicationAudioEffects: @escaping () -> Void = {},
          routingEnabled: Bool = false, audioRoute: AppAudioRoute = .allOutputs,
+         routePaused: Bool = false,
          routeOutputs: [AudioOutput] = [],
          setAudioRoute: @escaping (AppAudioRoute) -> Void = { _ in },
          toggleRouteOutput: @escaping (String) -> Void = { _ in },
@@ -52,6 +54,7 @@ struct ApplicationMixerRow: View {
         self.audioEffect = audioEffect
         self.routingEnabled = routingEnabled
         self.audioRoute = audioRoute
+        self.routePaused = routePaused
         self.routeOutputs = routeOutputs
         self.toggleMute = toggleMute
         self.setGain = setGain
@@ -89,6 +92,11 @@ struct ApplicationMixerRow: View {
                         .background(PanelStyle.canvas, in: Circle())
                         .help(L10n.text(error, language: language))
                         .accessibilityLabel(L10n.text(error, language: language))
+                } else if routePaused {
+                    Image(systemName: "pause.circle.fill")
+                        .font(.system(size: 10)).foregroundStyle(PanelStyle.secondary)
+                        .background(PanelStyle.canvas, in: Circle())
+                        .help(L10n.text("所选输出不可用，已暂停播放", language: language))
                 } else if state.managed && awaitingStream {
                     Circle().fill(.orange).frame(width: 6, height: 6)
                         .help(L10n.text("等待音频流", language: language))
@@ -114,7 +122,7 @@ struct ApplicationMixerRow: View {
             if effectsAvailable {
                 effectButton
             }
-            if routingEnabled {
+            if routingEnabled || audioRoute.isCustom {
                 routingButton
             }
         }
@@ -129,7 +137,7 @@ struct ApplicationMixerRow: View {
     }
 
     private var trailingControlCount: Int {
-        (effectsAvailable ? 1 : 0) + (routingEnabled ? 1 : 0)
+        (effectsAvailable ? 1 : 0) + ((routingEnabled || audioRoute.isCustom) ? 1 : 0)
     }
 
     /// 两个入口同时出现时只压缩应用名与滑杆的弹性空间，不增加行高。
@@ -211,9 +219,9 @@ struct ApplicationMixerRow: View {
     /// 路由按钮保持 26pt 方形并沿用现有前景悬停规则，避免应用行因为新增入口撑高。
     private var routingButton: some View {
         var button = PanelActionButton(
-            systemName: "arrow.triangle.branch",
+            systemName: routePaused ? "pause.circle" : "arrow.triangle.branch",
             title: routingTitle,
-            tint: audioRoute.isCustom ? PanelStyle.accent : nil,
+            tint: routePaused ? PanelStyle.secondary : (audioRoute.isCustom ? PanelStyle.accent : nil),
             hoverStyle: .foregroundOnly,
             menu: { routeMenu() }
         )
@@ -222,6 +230,7 @@ struct ApplicationMixerRow: View {
     }
 
     private var routingTitle: String {
+        if routePaused { return L10n.text("所选输出不可用，已暂停播放", language: language) }
         guard audioRoute.isCustom else {
             return L10n.text("全部输出：自动包含新增设备", language: language)
         }
@@ -229,7 +238,7 @@ struct ApplicationMixerRow: View {
             .filter { audioRoute.customDeviceUIDs.contains($0.uid) }
             .map(\.name)
         guard !names.isEmpty else {
-            return L10n.text("自定义路由暂不可用，当前按全部输出播放", language: language)
+            return L10n.text("所选输出当前不可用", language: language)
         }
         return L10n.format("自定义输出：%@", language: language,
                            arguments: [names.joined(separator: language == .english ? ", " : "、")])
@@ -259,14 +268,19 @@ struct ApplicationMixerRow: View {
             }
             let isSelected = selectedActiveUIDs.contains(output.uid)
             item.state = isSelected ? .on : .off
-            // 最后一个有效输出不能通过菜单取消；保留唯一目标，避免出现空路由错误。
-            item.isEnabled = !(isSelected && selectedActiveUIDs.count == 1)
+            // 最后一个保存的目标不能取消；有离线目标时，用户可以主动取消唯一在线目标而暂停。
+            let selectedCount = audioRoute.isCustom ? audioRoute.customDeviceUIDs.count : selectedActiveUIDs.count
+            item.isEnabled = routingEnabled && !(isSelected && selectedCount == 1)
             menu.addItem(item)
         }
 
-        if audioRoute.isCustom, selectedActiveUIDs.isEmpty {
-            let unavailable = NSMenuItem(title: L10n.text("自定义路由暂不可用，当前按全部输出播放", language: language),
-                                         action: nil, keyEquivalent: "")
+        let unavailableCount = audioRoute.customDeviceUIDs.subtracting(activeUIDs).count
+        if unavailableCount > 0 {
+            let unavailable = NSMenuItem(
+                title: L10n.format("%d 台所选设备当前不可用", language: language, arguments: [unavailableCount]),
+                action: nil, keyEquivalent: "")
+            // 离线不取消勾选，也不把“全部输出”标成已生效。
+            unavailable.state = .on
             unavailable.isEnabled = false
             menu.addItem(unavailable)
         }

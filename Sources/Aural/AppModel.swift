@@ -444,7 +444,6 @@ final class AppModel: ObservableObject {
                     }
                 }
             }
-            normalizeApplicationAudioRoutes()
             if observesHeadphones { updateHeadphoneControl(from: observed) }
             updateRouteConfirmationActivity()
         } catch {
@@ -654,8 +653,7 @@ final class AppModel: ObservableObject {
               !outputRouting.phase.isBusy,
               outputRouting.isSimultaneous,
               let confirmed = outputRouting.confirmed,
-              confirmed.intent.isSimultaneous,
-              confirmed.aggregate != nil else { return false }
+              confirmed.intent.isSimultaneous else { return false }
         let configured = outputRouting.configured?.memberUIDs ?? confirmed.intent.memberUIDs
         return Set(configured.filter { !$0.isEmpty }).count > 1
     }
@@ -671,35 +669,36 @@ final class AppModel: ObservableObject {
 
     func applicationAudioRoute(for applicationID: String) -> AppAudioRoute {
         guard let key = applicationRouteStorageKey(for: applicationID) else { return .allOutputs }
-        guard let context = applicationRouteContext else {
-            return appAudioRoutes[key] ?? .allOutputs
-        }
-        return AppAudioRouteResolver.resolve(
-            stored: appAudioRoutes[key] ?? .allOutputs,
-            configuredDeviceUIDs: context.configuredUIDs,
-            activeDeviceUIDs: context.activeOutputs.map(\.uid)
-        ).persisted
+        return appAudioRoutes[key] ?? .allOutputs
     }
 
-    func effectiveApplicationAudioRoute(for applicationID: String) -> AppAudioRoute {
-        guard let key = applicationRouteStorageKey(for: applicationID) else { return .allOutputs }
-        // 退出多设备模式后只暂停实际音频路由；保存的自定义意图仍由 applicationAudioRoute 读取。
-        guard let context = applicationRouteContext else { return .allOutputs }
-        return AppAudioRouteResolver.resolve(
-            stored: appAudioRoutes[key] ?? .allOutputs,
-            configuredDeviceUIDs: context.configuredUIDs,
-            activeDeviceUIDs: context.activeOutputs.map(\.uid)
-        ).effective
+    func effectiveApplicationAudioRoute(for applicationID: String) -> EffectiveAppAudioRoute {
+        resolvedApplicationAudioRoute(for: applicationID).effective
+    }
+
+    /// 等待意图不等于已成功暂停；只有静音会话确实停止重放且没有清理失败时才显示暂停。
+    func applicationRoutePlaybackPaused(for applicationID: String) -> Bool {
+        effectiveApplicationAudioRoute(for: applicationID).isWaitingForDevices
+            && mixStates[applicationID]?.failure == nil
+            && cleanupErrors[applicationID] == nil
+            && sessions[applicationID]?.isSuspendedForOutputChange == true
+            && sessions[applicationID]?.isActive == false
     }
 
     func applicationRouteUnavailableDeviceUIDs(for applicationID: String) -> Set<String> {
-        guard let key = applicationRouteStorageKey(for: applicationID),
-              let context = applicationRouteContext else { return [] }
+        resolvedApplicationAudioRoute(for: applicationID).unavailableDeviceUIDs
+    }
+
+    private func resolvedApplicationAudioRoute(for applicationID: String) -> ResolvedAppAudioRoute {
+        let stored = applicationAudioRoute(for: applicationID)
+        // 组合切换、失败、缩成单成员或退出模式时仍保留自定义意图。
+        // 没有可信的组上下文就等待，不用当前默认设备替代用户选定的目标。
+        let context = applicationRouteContext
         return AppAudioRouteResolver.resolve(
-            stored: appAudioRoutes[key] ?? .allOutputs,
-            configuredDeviceUIDs: context.configuredUIDs,
-            activeDeviceUIDs: context.activeOutputs.map(\.uid)
-        ).unavailableDeviceUIDs
+            stored: stored,
+            configuredDeviceUIDs: context?.configuredUIDs ?? [],
+            activeDeviceUIDs: context?.activeOutputs.map(\.uid) ?? []
+        )
     }
 
     /// 界面读取保存的完整设置；总开关关闭时仍保留预设和滑块值。
@@ -891,25 +890,26 @@ final class AppModel: ObservableObject {
     /// 设置自定义路由会实际创建/重建应用的 Process Tap 重放链，而不是只改界面勾选。
     func setApplicationAudioRoute(_ route: AppAudioRoute, for applicationID: String) {
         guard refreshAudioCaptureAccess() else { return }
-        guard applicationAudioRoutingEnabled, let context = applicationRouteContext else {
-            operationError = "应用路由仅在多设备输出模式下可用"
-            return
-        }
         guard let key = applicationRouteStorageKey(for: applicationID) else {
             operationError = "该应用没有稳定身份，不能设置持久应用路由"
             return
         }
-
         if case .custom(let deviceUIDs) = route {
+            guard applicationAudioRoutingEnabled, let context = applicationRouteContext else {
+                operationError = "应用路由仅在多设备输出模式下可用"
+                return
+            }
             guard !deviceUIDs.isEmpty else {
                 operationError = "至少选择一台输出设备"
                 return
             }
-            guard deviceUIDs.isSubset(of: Set(context.configuredUIDs)) else {
+            let allowed = Set(context.configuredUIDs).union(applicationAudioRoute(for: applicationID).customDeviceUIDs)
+            guard deviceUIDs.isSubset(of: allowed) else {
                 operationError = "应用路由目标必须来自当前多设备输出组"
                 return
             }
         }
+        // 全部输出是明确解除限制的操作；即使组已退出，也允许用户取消自定义路由。
 
         var nextRoutes = appAudioRoutes
         if route == .allOutputs {
@@ -964,15 +964,14 @@ final class AppModel: ObservableObject {
     }
 
     private var applicationRouteContext: (configuredUIDs: [String], activeOutputs: [AudioOutput])? {
-        guard outputRouting.phase != .failed,
+        guard audio != nil, outputRouting.phase != .failed,
               !outputRouting.phase.isBusy,
               outputRouting.isSimultaneous,
               let confirmed = outputRouting.confirmed,
-              confirmed.intent.isSimultaneous,
-              let aggregate = confirmed.aggregate else { return nil }
+              confirmed.intent.isSimultaneous else { return nil }
         let configured = outputRouting.configured?.memberUIDs ?? confirmed.intent.memberUIDs
         let unavailable = Set(outputRouting.unavailableMemberUIDs)
-        let active = aggregate.outputs.filter { !unavailable.contains($0.uid) }
+        let active = (confirmed.aggregate?.outputs ?? [confirmed.output]).filter { !unavailable.contains($0.uid) }
         return (configured.filter { !$0.isEmpty }, active)
     }
 
@@ -981,45 +980,6 @@ final class AppModel: ObservableObject {
             ?? playingApplications.first { $0.id == applicationID }
         guard let app, !app.bundleID.isEmpty else { return nil }
         return "bundle:\(app.bundleID)"
-    }
-
-    /// 组成员移除后清理持久意图；设备仅暂时不可用时保留 UID，等待重连恢复。
-    private func normalizeApplicationAudioRoutes() {
-        guard !outputRouting.phase.isBusy,
-              outputRouting.phase != .failed,
-              outputRouting.isSimultaneous,
-              let confirmed = outputRouting.confirmed,
-              confirmed.intent.isSimultaneous,
-              let aggregate = confirmed.aggregate else { return }
-        let configured = outputRouting.configured?.memberUIDs ?? confirmed.intent.memberUIDs
-        let unavailable = Set(outputRouting.unavailableMemberUIDs)
-        let active = aggregate.outputs.map(\.uid).filter { !unavailable.contains($0) }
-
-        var nextRoutes = appAudioRoutes
-        var changed = false
-        for (key, route) in appAudioRoutes {
-            let normalized = AppAudioRouteResolver.resolve(
-                stored: route,
-                configuredDeviceUIDs: configured,
-                activeDeviceUIDs: active
-            ).persisted
-            if normalized == .allOutputs {
-                nextRoutes.removeValue(forKey: key)
-                changed = true
-            } else if normalized != route {
-                nextRoutes[key] = normalized
-                changed = true
-            }
-        }
-        guard changed else { return }
-        do {
-            try appAudioRouteStore.save(nextRoutes)
-            appAudioRoutes = nextRoutes
-            appAudioRoutePersistenceError = nil
-        } catch {
-            appAudioRoutePersistenceError = error.localizedDescription
-            operationError = error.localizedDescription
-        }
     }
 
     private func pauseManagedApplications(_ reason: String) {
@@ -1083,7 +1043,7 @@ final class AppModel: ObservableObject {
     private func reconcile(_ app: ApplicationAudioRow) {
         guard audioCaptureAccess.allowsApplicationAudio else { return }
         guard var state = mixStates[app.id], cleanupErrors[app.id] == nil else { return }
-        guard !outputRouting.phase.isBusy, outputRouting.phase != .failed,
+        guard audio != nil, !outputRouting.phase.isBusy, outputRouting.phase != .failed,
               let confirmed = outputRouting.confirmed,
               processError == nil else {
             // 切换中、失败态或进程读取暂时不可信时，mixing 会话只能暂停重放，
@@ -1096,6 +1056,11 @@ final class AppModel: ObservableObject {
             return
         }
         let output = confirmed.output
+        let effectiveRoute = effectiveApplicationAudioRoute(for: app.id)
+        if effectiveRoute.isWaitingForDevices {
+            holdApplicationForUnavailableRoute(app, output: output, state: state)
+            return
+        }
         if output.isAggregate {
             // 只有本进程刚建立、且仍与当前快照一致的 Aural 聚合才能被接管；
             // 第三方聚合和上次启动遗留的聚合都缺少可信成员镜像，不能猜测音频路线。
@@ -1109,7 +1074,7 @@ final class AppModel: ObservableObject {
                 return
             }
         }
-        let requiresRouting = effectiveApplicationAudioRoute(for: app.id).isCustom
+        let requiresRouting = effectiveRoute.isCustom
         let effect = effectiveApplicationAudioEffect(for: app.id)
         let requiresEffects = effect != nil
         guard let mode = ApplicationAudioIntent.mode(
@@ -1159,8 +1124,12 @@ final class AppModel: ObservableObject {
         }
         let expectedPlaybackRoute = requestedPlaybackRoute ?? .single(output)
         if let session = sessions[app.id], session.mode == mode,
-           session.group.objectIDs == group.objectIDs {
+           (session.group.objectIDs == group.objectIDs || mode == .mixing) {
             do {
+                if session.group.objectIDs != group.objectIDs {
+                    try session.suspendForOutputChange()
+                    try updateSessionProcesses(session, to: group, applicationID: app.id)
+                }
                 if mode == .mixing {
                     try session.setGain(state.gain)
                     session.setMuted(state.muted)
@@ -1198,6 +1167,54 @@ final class AppModel: ObservableObject {
             guard stop(app.id) else { return }
             start(group, output: output, state: state, mode: mode,
                   playbackRoute: requestedPlaybackRoute, effect: effect)
+        }
+    }
+
+    /// 同一 tap 扩展进程集合前也要检查其他会话的所有权，不能因复用绕过防重叠校验。
+    private func updateSessionProcesses(_ session: any ApplicationAudioSession, to group: AudioProcessGroup,
+                                        applicationID: String) throws {
+        let others = sessions.filter { $0.key != applicationID }.values.map { $0.group.objectIDs }
+        guard !AudioSessionOwnership.overlaps(requested: group.objectIDs, existing: others) else {
+            throw AudioFailure("该音频流仍被尚未释放的旧会话持有，请先释放资源再重新应用。")
+        }
+        try session.updateProcesses(to: group)
+    }
+
+    /// 暂停是有意的无声状态：已有混音 tap 不释放，首次启动也不在扬声器建重放端。
+    private func holdApplicationForUnavailableRoute(_ app: ApplicationAudioRow,
+                                                   output: AudioOutput, state: ApplicationMixState) {
+        levelSources[app.id]?.update(nil)
+        meterEnvelopes.removeValue(forKey: app.id)
+        sessionRouteWaitSince.removeValue(forKey: app.id)
+        if let session = sessions[app.id], session.mode == .mixing {
+            guard preserveMixingSession(app.id) else { return }
+            do {
+                if let group = app.group, session.group.objectIDs != group.objectIDs {
+                    try updateSessionProcesses(session, to: group, applicationID: app.id)
+                }
+                try session.setGain(state.gain)
+                session.setMuted(state.muted)
+                session.setEffect(effectiveApplicationAudioEffect(for: app.id))
+            } catch { latchApplicationFailure(error.localizedDescription, for: app.id) }
+            return
+        }
+        guard state.failure == nil, let group = app.group, !isFineTuneRunning,
+              stop(app.id), let applicationEnvironment else { return }
+        guard !AudioSessionOwnership.overlaps(requested: group.objectIDs,
+                                              existing: sessions.values.map { $0.group.objectIDs }) else {
+            latchApplicationFailure("该音频流仍被尚未释放的旧会话持有，请先释放资源再重新应用。", for: app.id)
+            return
+        }
+        let session = applicationEnvironment.makeSession(group, output, nil, .mixing)
+        sessions[app.id] = session
+        do {
+            try session.setGain(state.gain)
+            session.setMuted(state.muted)
+            session.setEffect(effectiveApplicationAudioEffect(for: app.id))
+            try session.startSuspended()
+        } catch {
+            latchApplicationFailure(error.localizedDescription, for: app.id)
+            if session.isReleased { sessions.removeValue(forKey: app.id) }
         }
     }
 
@@ -1587,13 +1604,17 @@ final class AppModel: ObservableObject {
         }
         let effective = effectiveApplicationAudioRoute(for: appID)
         let playbackOutputs: [AudioOutput]
-        if case .custom(let targetUIDs) = effective {
+        switch effective {
+        case .custom(let targetUIDs):
             playbackOutputs = route.outputs.filter { targetUIDs.contains($0.uid) }
             guard !playbackOutputs.isEmpty else {
                 throw AudioFailure("应用自定义路由的所选设备当前不可用")
             }
-        } else {
+        case .allOutputs:
             playbackOutputs = route.outputs
+        case .waitingForDevices:
+            // 即使未来调用方遗漏等待 guard，这里也绝不能生成全设备重放链。
+            throw AudioFailure("所选输出不可用，已暂停播放")
         }
         return try ApplicationPlaybackRoute(output: output,
                                             playbackOutputs: playbackOutputs,

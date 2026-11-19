@@ -140,6 +140,9 @@ enum L10n {
     }
 
     private static let english: [String: String] = [
+        "所选输出不可用，已暂停播放": "Selected output unavailable. Playback paused.",
+        "所选输出当前不可用": "Selected output unavailable.",
+        "%d 台所选设备当前不可用": "%d selected output(s) unavailable",
         "左 %d%%": "L %d%%",
         "右 %d%%": "R %d%%",
         "盒 %d%%": "Case %d%%",
@@ -504,8 +507,6 @@ enum L10n {
             "App routing targets must belong to the current multi-device group",
         "该应用没有稳定身份，不能设置持久应用路由":
             "This app has no stable identity, so its route cannot be saved",
-        "自定义路由暂不可用，当前按全部输出播放":
-            "The custom route is temporarily unavailable. Playing through all available outputs.",
         "已应用自定义路由": "Custom route applied",
         "应用路由配置无法读取，请检查本地设置":
             "Could not read the app routing configuration. Check the local settings.",

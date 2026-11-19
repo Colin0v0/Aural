@@ -69,15 +69,27 @@ public enum AppAudioRoute: Codable, Equatable, Sendable {
     }
 }
 
-/// 路由解析同时返回“应该保存什么”和“这一轮真正能播放什么”。
-/// 两者分开是为了保留暂时断开的设备意图，同时不让当前音频因设备离线而静音。
+/// 运行时可用性不写回持久化意图；没有目标是明确的等待状态，不是“全部输出”。
+public enum EffectiveAppAudioRoute: Equatable, Sendable {
+    case allOutputs
+    case custom(deviceUIDs: Set<String>)
+    case waitingForDevices
+
+    public var isCustom: Bool { self != .allOutputs }
+    public var isWaitingForDevices: Bool { self == .waitingForDevices }
+    public var customDeviceUIDs: Set<String> {
+        guard case .custom(let uids) = self else { return [] }
+        return uids
+    }
+}
+
+/// 保存用户选择，另报当前可以播放的子集；离线或移出组都不能悄悄扩大输出范围。
 public struct ResolvedAppAudioRoute: Equatable, Sendable {
     public let persisted: AppAudioRoute
-    public let effective: AppAudioRoute
+    public let effective: EffectiveAppAudioRoute
     public let unavailableDeviceUIDs: Set<String>
 
-    public init(persisted: AppAudioRoute,
-                effective: AppAudioRoute,
+    public init(persisted: AppAudioRoute, effective: EffectiveAppAudioRoute,
                 unavailableDeviceUIDs: Set<String>) {
         self.persisted = persisted
         self.effective = effective
@@ -85,47 +97,24 @@ public struct ResolvedAppAudioRoute: Equatable, Sendable {
     }
 }
 
-/// 纯函数路由约束，避免设备变化时在音频回调或 SwiftUI 视图中做集合决策。
+/// 纯函数路由约束，集合决策不进入实时音频回调。
 public enum AppAudioRouteResolver {
-    /// - Parameters:
-    ///   - stored: 用户之前保存的路由意图。
-    ///   - configuredDeviceUIDs: 当前多设备组中仍被用户勾选的设备，允许暂时离线。
-    ///   - activeDeviceUIDs: 当前已确认可播放的组成员。
     public static func resolve(stored: AppAudioRoute,
                                configuredDeviceUIDs: [String],
                                activeDeviceUIDs: [String]) -> ResolvedAppAudioRoute {
         let configured = Set(configuredDeviceUIDs.filter { !$0.isEmpty })
         let active = Set(activeDeviceUIDs.filter { configured.contains($0) })
-
         switch stored {
         case .allOutputs:
-            return ResolvedAppAudioRoute(persisted: .allOutputs,
-                                         effective: .allOutputs,
+            return ResolvedAppAudioRoute(persisted: stored, effective: .allOutputs,
                                          unavailableDeviceUIDs: [])
-
         case .custom(let requested):
-            // 用户已经从多设备组移除的设备不再属于配置；暂时离线但仍被勾选的 UID 会继续保留。
-            let retained = requested.intersection(configured)
-            guard !retained.isEmpty else {
-                return ResolvedAppAudioRoute(persisted: .allOutputs,
-                                             effective: .allOutputs,
-                                             unavailableDeviceUIDs: [])
-            }
-
-            let effectiveTargets = retained.intersection(active)
-            let unavailable = retained.subtracting(active)
-            if effectiveTargets.isEmpty {
-                // 明确按任务约定回退到全部输出，避免设备切换期间应用被永久静音。
-                // 保存意图仍保留，设备按稳定 UID 重连后会重新恢复自定义路由。
-                return ResolvedAppAudioRoute(persisted: .custom(deviceUIDs: retained),
-                                             effective: .allOutputs,
-                                             unavailableDeviceUIDs: unavailable)
-            }
-
+            let targets = requested.intersection(active)
+            // 保留完整请求，包括已经移出组的设备。只有新的明确选择才能修改它。
             return ResolvedAppAudioRoute(
-                persisted: .custom(deviceUIDs: retained),
-                effective: .custom(deviceUIDs: effectiveTargets),
-                unavailableDeviceUIDs: unavailable
+                persisted: stored,
+                effective: targets.isEmpty ? .waitingForDevices : .custom(deviceUIDs: targets),
+                unavailableDeviceUIDs: requested.subtracting(active)
             )
         }
     }
