@@ -54,6 +54,47 @@ struct RenderCallbackTests {
         #expect(state.callbacks.load(ordering: .relaxed) == 1)
     }
 
+    /// 静音和音量归零必须覆盖空间尾音，而不只是停止给混响送入新声音。
+    @Test(arguments: [AppAudioSpatialMode.room, .hall, .vocalSpace])
+    func zeroGainSilencesSpatialTailAfterTheFade(mode: AppAudioSpatialMode) {
+        let frames = 256
+        let source = UnsafeMutablePointer<Float>.allocate(capacity: frames * 2)
+        let destination = UnsafeMutablePointer<Float>.allocate(capacity: frames * 2)
+        source.initialize(repeating: 0.4, count: frames * 2)
+        destination.initialize(repeating: 0, count: frames * 2)
+        defer { source.deallocate(); destination.deallocate() }
+        let input = AudioBufferList.allocate(maximumBuffers: 1)
+        let output = AudioBufferList.allocate(maximumBuffers: 1)
+        defer { input.unsafeMutablePointer.deallocate(); output.unsafeMutablePointer.deallocate() }
+        input[0] = AudioBuffer(mNumberChannels: 2, mDataByteSize: UInt32(frames * 8), mData: source)
+        output[0] = AudioBuffer(mNumberChannels: 2, mDataByteSize: UInt32(frames * 8), mData: destination)
+        var effect = AppAudioEffectSettings(enabled: true)
+        effect.spatial = AppAudioSpatialSettings(mode: mode, intensity: 1)
+        let state = RenderState(sampleRate: 48_000, effect: effect)
+        var time = AudioTimeStamp()
+        func render() {
+            _ = auralAudioCallback(0, &time, input.unsafePointer, &time,
+                                  output.unsafeMutablePointer, &time,
+                                  Unmanaged.passUnretained(state).toOpaque())
+        }
+        // 先让延迟线里确实有声音，避免用空混响证明“静音成功”。
+        for _ in 0..<32 { render() }
+        #expect((0..<(frames * 2)).contains { abs(destination[$0]) > 0.001 })
+        state.target.store(Float(0).bitPattern, ordering: .relaxed)
+        for _ in 0..<8 { render() }
+        let maximumAfterMute = (0..<(frames * 2)).map { abs(destination[$0]) }.max()!
+        #expect(state.ramp.current == 0)
+        #expect(maximumAfterMute == 0)
+        _ = state.peak.consume()
+        render()
+        #expect(state.peak.consume() == 0)
+        // 取消静音仍沿用原音效状态和平滑增益，不能让静音成为永久无声。
+        state.target.store(Float(0.5).bitPattern, ordering: .relaxed)
+        for _ in 0..<8 { render() }
+        #expect(state.ramp.current == 0.5)
+        #expect((0..<(frames * 2)).contains { abs(destination[$0]) > 0.001 })
+    }
+
     @Test func layoutMismatchZerosOutputAndReportsFault() {
         let source = UnsafeMutablePointer<Float>.allocate(capacity: 2)
         let destination = UnsafeMutablePointer<Float>.allocate(capacity: 2)

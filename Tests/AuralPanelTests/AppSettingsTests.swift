@@ -71,6 +71,12 @@ struct AppSettingsTests {
                 == "Multi-Device Output · 2 Devices")
         #expect(L10n.text("菜单栏电量", language: .english) == "Menu Bar Battery")
         #expect(L10n.text("菜单栏设备图标", language: .english) == "Menu Bar Device Icon")
+        #expect(L10n.text("诊断", language: .english) == "Diagnostics")
+        #expect(L10n.text("导出诊断报告…", language: .english) == "Export Diagnostics…")
+        #expect(L10n.text("导出音频状态与错误日志。", language: .english)
+                == "Export audio state and error logs.")
+        #expect(L10n.text("打开 GitHub 项目主页", language: .english)
+                == "Open GitHub Project")
         #expect(L10n.text("开启后，图标会显示当前使用的电脑、耳机或显示器。", language: .english)
                 == "Shows the current computer, headphones, or display.")
         #expect(L10n.text("跟随当前输出", language: .english) == "Follow Current Output")
@@ -213,7 +219,14 @@ struct AppSettingsTests {
     @Test func settingsWindowUsesTheDeclaredFixedSize() {
         let size = SettingsMetrics.size
         #expect(size.width == 500)
-        #expect(size.height == 572)
+        #expect(size.height == 660)
+    }
+
+    @Test func repositoryLinkUsesTheInjectedRepositoryIdentity() throws {
+        let url = try #require(AuralProjectLinks.repositoryURL(repository: "Colin0v0/Aural"))
+        #expect(url.absoluteString == "https://github.com/Colin0v0/Aural")
+        #expect(AuralProjectLinks.repositoryURL(repository: nil) == nil)
+        #expect(AuralProjectLinks.repositoryURL(repository: "") == nil)
     }
 
     @Test func englishSettingDescriptionsFitOneLine() {

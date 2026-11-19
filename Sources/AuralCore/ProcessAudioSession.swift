@@ -30,11 +30,14 @@ final class RenderState {
     let peak = AudioPeakMailbox()
     let mode: ApplicationAudioMode
     var ramp: GainRamp
+    /// 末端淡出覆盖 EQ 与混响存量，不能只把送入音效的新声音归零。
+    var silenceRamp: GainRamp
     var effects: AppAudioEffectDSP
     init(sampleRate: Double, initialGain: Float = 1, mode: ApplicationAudioMode = .mixing,
          effect: AppAudioEffectSettings? = nil) {
         self.mode = mode
         ramp = GainRamp(sampleRate: sampleRate, initial: initialGain)
+        silenceRamp = GainRamp(sampleRate: sampleRate, initial: initialGain == 0 ? 0 : 1)
         effects = AppAudioEffectDSP(sampleRate: sampleRate)
         effectWord.store(AppAudioEffectParameterWord.pack(effect), ordering: .relaxed)
         spatialWord.store(AppAudioSpatialParameterWord.pack(effect), ordering: .relaxed)
@@ -202,6 +205,9 @@ let auralAudioCallback: AudioDeviceIOProc = { _, _, input, _, output, _, context
     var peak: Float = 0
     for frame in 0..<frames {
         let gain = state.mode == .mixing ? state.ramp.advance(toward: target) : 1
+        // 静音与滑杆归零共用目标值；在所有音效之后淡出，连已经存在的尾音一起关闭。
+        let outputGate = state.mode == .mixing
+            ? state.silenceRamp.advance(toward: target == 0 ? 0 : 1) : 1
         let effectsActive = state.mode == .mixing && state.effects.beginFrame()
         if effectsActive {
             var processed = (left: Float(0), right: Float(0))
@@ -221,14 +227,15 @@ let auralAudioCallback: AudioDeviceIOProc = { _, _, input, _, output, _, context
             state.effects.processSpatial(&processed, channels: totalChannels)
             state.effects.processDynamics(&processed, channels: totalChannels)
             let limited = state.effects.limitFrame(&processed, channels: totalChannels)
-            peak = max(peak, abs(limited.0), abs(limited.1))
+            let rendered = (limited.0 * outputGate, limited.1 * outputGate)
+            peak = max(peak, abs(rendered.0), abs(rendered.1))
             channelOffset = 0
             for i in ins.indices {
                 let destination = outs[i].mData!.assumingMemoryBound(to: Float.self)
                 let channels = Int(ins[i].mNumberChannels)
                 for channel in 0..<channels {
                     let index = frame * channels + channel
-                    destination[index] = channelOffset + channel == 0 ? limited.0 : limited.1
+                    destination[index] = channelOffset + channel == 0 ? rendered.0 : rendered.1
                 }
                 channelOffset += channels
             }
@@ -239,7 +246,7 @@ let auralAudioCallback: AudioDeviceIOProc = { _, _, input, _, output, _, context
                 let channels = Int(ins[i].mNumberChannels)
                 for channel in 0..<channels {
                     let index = frame * channels + channel
-                    let sample = source[index] * gain
+                    let sample = source[index] * gain * outputGate
                     if sample.isFinite { peak = max(peak, abs(sample)) }
                     // 只读计量不重放捕获音频，避免原始声音与本进程的输出叠加。
                     if state.mode == .mixing { destination[index] = sample }

@@ -250,6 +250,14 @@ struct AudioPanel: View {
         menu.addItem(PanelActionMenuItem(title: settings.localized("音频录制权限…")) {
             model.openAudioCaptureSettings()
         })
+        menu.addItem(PanelActionMenuItem(title: settings.localized("导出诊断报告…")) {
+            exportDiagnostics()
+        })
+        if let url = AuralProjectLinks.repositoryURL {
+            menu.addItem(PanelActionMenuItem(title: settings.localized("GitHub 项目主页")) {
+                NSWorkspace.shared.open(url)
+            })
+        }
         let diagnostic = PanelActionMenuItem(title: settings.localized("复制耳机诊断")) {
             NSPasteboard.general.clearContents()
             NSPasteboard.general.setString(model.headphones.diagnosticLines.joined(separator: "\n"), forType: .string)
@@ -257,6 +265,27 @@ struct AudioPanel: View {
         diagnostic.isEnabled = !model.headphones.diagnosticLines.isEmpty
         menu.addItem(diagnostic)
         return menu
+    }
+
+    private func exportDiagnostics() {
+        let report = model.makeDiagnosticReport()
+        do {
+            guard let url = try AuralDiagnosticExporter.save(report) else { return }
+            model.diagnosticEventLog.record(category: "diagnostics",
+                                            message: "saved \(url.lastPathComponent)")
+        } catch {
+            model.diagnosticEventLog.record(category: "diagnostics",
+                                            message: "export failed: \(error.localizedDescription)")
+            presentDiagnosticError(settings.localized("无法导出诊断报告"), error.localizedDescription)
+        }
+    }
+
+    private func presentDiagnosticError(_ title: String, _ detail: String) {
+        let alert = NSAlert()
+        alert.messageText = title
+        alert.informativeText = detail
+        alert.addButton(withTitle: settings.localized("好"))
+        alert.runModal()
     }
 
 }
