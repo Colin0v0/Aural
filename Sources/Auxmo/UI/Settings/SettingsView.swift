@@ -212,36 +212,6 @@ struct SettingsView: View {
             }
             .padding(.vertical, 8)
             .frame(minHeight: 52)
-            HStack {
-                Text(settings.localized("更新残留")).font(PanelStyle.bodyFont)
-                Spacer(minLength: 12)
-                Button(settings.localized("检查并清理…")) {
-                    Task { @MainActor in await inspectUpdateStaging() }
-                }
-                .buttonStyle(PanelButtonStyle())
-                .disabled(updates.isInspectingRecovery)
-            }
-            .padding(.vertical, 4)
-        }
-    }
-
-    @MainActor private func inspectUpdateStaging() async {
-        do {
-            let inspection = try await updates.inspectUpdateStaging()
-            guard inspection.canRemoveStaleMarker else {
-                presentDiagnosticError(settings.localized("更新残留"), settings.localized("没有需要清理的失效挂载标记"))
-                return
-            }
-            let alert = NSAlert()
-            alert.messageText = settings.localized("清理失效挂载标记？")
-            alert.informativeText = settings.localized("已确认相关镜像未连接。仅移除失效标记，不删除旧版本备份或安装包。") + "\n" + inspection.stage.path
-            alert.addButton(withTitle: settings.localized("清理"))
-            alert.addButton(withTitle: settings.localized("取消"))
-            guard alert.runModal() == .alertFirstButtonReturn else { return }
-            try await updates.clearStaleMountRecord(inspection)
-            presentDiagnosticError(settings.localized("更新残留"), settings.localized("失效挂载标记已清理，可重新下载更新"))
-        } catch {
-            presentDiagnosticError(settings.localized("无法清理更新残留"), error.localizedDescription)
         }
     }
 

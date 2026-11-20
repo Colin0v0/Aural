@@ -107,17 +107,20 @@ enum PanelStyle {
 /// 长文字操作只按内容扩展宽度；与正方形短操作共用高度、圆角和悬停底色。
 struct PanelButtonStyle: ButtonStyle {
     var prominent = false
+    /// 静音等状态按钮需要保持自己的语义色；未指定时沿用统一的正文/反白颜色。
+    var foreground: Color?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.isEnabled) private var isEnabled
 
     func makeBody(configuration: Configuration) -> some View {
-        PanelButtonBody(configuration: configuration, prominent: prominent,
+        PanelButtonBody(configuration: configuration, prominent: prominent, foreground: foreground,
                         reduceMotion: reduceMotion, isEnabled: isEnabled)
     }
 
     private struct PanelButtonBody: View {
         let configuration: ButtonStyle.Configuration
         let prominent: Bool
+        let foreground: Color?
         let reduceMotion: Bool
         let isEnabled: Bool
         // 沿用工程的 ObservableObject 状态模式，兼容当前 CLT 的 SwiftUI 工具链。
@@ -128,7 +131,7 @@ struct PanelButtonStyle: ButtonStyle {
 
         var body: some View {
             configuration.label
-                .foregroundStyle(prominent ? PanelStyle.prominentInk : PanelStyle.ink)
+                .foregroundStyle(foreground ?? (prominent ? PanelStyle.prominentInk : PanelStyle.ink))
                 .padding(.horizontal, PanelActionMetrics.horizontalPadding)
                 .frame(minWidth: PanelActionMetrics.size).frame(height: PanelActionMetrics.size)
                 .background {

@@ -91,6 +91,8 @@ struct AppSettingsTests {
         #expect(L10n.text("检查失败，重试", language: .english) == "Check Failed, Retry")
         #expect(L10n.format("发现新版本 %@", language: .english, arguments: ["0.1.11"])
                 == "Version 0.1.11 is available")
+        #expect(L10n.text("全部静音", language: .english) == "Mute All")
+        #expect(L10n.text("取消静音", language: .english) == "Unmute")
         #expect(L10n.text("设备未公开可写的硬件静音控制", language: .english)
                 == "Device does not expose writable hardware mute")
         #expect(L10n.text("没有这个键", language: .chinese) == "没有这个键")

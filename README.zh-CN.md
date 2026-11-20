@@ -18,7 +18,7 @@
   <a href="docs/CHANGELOG.md">更新记录</a>
 </p>
 <p align="center">
-  <a href="docs/images/hero-zh.png"><img src="docs/images/hero-zh.png" width="440" alt="Auxmo 主面板：扬声器、耳机、多设备输出，以及 Chrome 和 Music 的独立音量与路由按钮" /></a>
+  <a href="docs/images/hero-zh.png"><img src="docs/images/hero-zh.png?v=0.4.0" width="440" alt="Auxmo 主面板：扬声器、耳机、多设备输出，以及 Chrome 和 Music 的独立音量与路由按钮" /></a>
 </p>
 <p align="center"><sub>界面预览由 Auxmo 0.4.0 使用示例设备和应用数据渲染，并非实时音频会话。<a href="docs/images/README.md">图片来源</a>。</sub></p>
 
@@ -30,7 +30,7 @@
 
 先用音量和静音就好。需要时，再到设置里开启多设备输出、应用音效或耳机控制；这三项默认关闭。
 
-需要立刻安静下来时，点 **全部静音**。它临时静音 Auxmo 能观察到的 App 音频，包括开启后才开始播放的 App；关闭后恢复各 App 原有的静音状态，不会把设置全部清掉。
+需要立刻安静下来时，点主面板右上角的 **全部静音**。它临时静音 Auxmo 能观察到的 App 音频，包括开启后才开始播放的 App；关闭后恢复各 App 原有的静音状态，不会把设置全部清掉。
 
 ## 四个核心功能
 
@@ -39,24 +39,24 @@
 <td width="50%" valign="top">
 <h3>每个 App，单独调节</h3>
 <p>给 Chrome 和 Music 设置不同音量，单独静音；面板打开时可查看实时电平。</p>
-<a href="docs/images/mixer-zh.png"><img src="docs/images/mixer-zh.png" width="440" alt="Chrome 与 Music 的独立音量滑杆、音效和路由入口" /></a>
+<a href="docs/images/mixer-zh.png"><img src="docs/images/mixer-zh.png?v=0.4.0" width="440" alt="Chrome 与 Music 的独立音量滑杆、音效和路由入口" /></a>
 </td>
 <td width="50%" valign="top">
 <h3>一个输出组，多种去向</h3>
 <p>把扬声器和耳机加入同一组，保留各设备的独立控制，再为每个 App 选择组内输出。</p>
-<a href="docs/images/outputs-zh.png"><img src="docs/images/outputs-zh.png" width="440" alt="多设备输出编辑器中同时勾选 MacBook 扬声器与 AirPods Pro" /></a>
+<a href="docs/images/outputs-zh.png"><img src="docs/images/outputs-zh.png?v=0.4.0" width="440" alt="多设备输出编辑器中同时勾选 MacBook 扬声器与 AirPods Pro" /></a>
 </td>
 </tr>
 <tr>
 <td width="50%" valign="top">
 <h3>按 App 调整听感</h3>
 <p>十段 EQ、空间效果、音量均衡与声道控制。保存自己的预设，也能随时对比原声。</p>
-<a href="docs/images/effects-zh.png"><img src="docs/images/effects-zh.png" width="440" alt="Music 音效窗口：十段均衡器、频响预览与对比原声按钮" /></a>
+<a href="docs/images/effects-zh.png"><img src="docs/images/effects-zh.png?v=0.4.0" width="440" alt="Music 音效窗口：十段均衡器、频响预览与对比原声按钮" /></a>
 </td>
 <td width="50%" valign="top">
 <h3>耳机控制，抬手就到</h3>
 <p>查看电量、切换当前型号公开的噪声模式。可用控制项取决于具体设备和固件。</p>
-<a href="docs/images/headphones-zh.png"><img src="docs/images/headphones-zh.png" width="440" alt="耳机控制示例：左右耳与充电盒电量、降噪、通透和自适应模式" /></a>
+<a href="docs/images/headphones-zh.png"><img src="docs/images/headphones-zh.png?v=0.4.0" width="440" alt="耳机控制示例：左右耳与充电盒电量、降噪、通透和自适应模式" /></a>
 </td>
 </tr>
 </table>
@@ -66,7 +66,7 @@
 两台设备都在线时，可以这样配置：
 
 <p align="center">
-  <img src="docs/images/routing-zh.svg" width="820" alt="路由示意：Chrome 经 Auxmo 输出到扬声器，Music 经 Auxmo 输出到耳机，两台设备属于同一个输出组" />
+  <img src="docs/images/routing-zh.svg?v=0.4.0" width="820" alt="路由示意：Chrome 经 Auxmo 输出到扬声器，Music 经 Auxmo 输出到耳机，两台设备属于同一个输出组" />
 </p>
 
 1. 在设置里开启 **显示多设备输出**。

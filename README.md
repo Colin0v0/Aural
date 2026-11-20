@@ -18,7 +18,7 @@
   <a href="docs/CHANGELOG.md">What's changed</a>
 </p>
 <p align="center">
-  <a href="docs/images/hero-en.png"><img src="docs/images/hero-en.png" width="440" alt="Auxmo output panel with speaker and headphone controls, independent Chrome and Music volumes, and per-app route buttons" /></a>
+  <a href="docs/images/hero-en.png"><img src="docs/images/hero-en.png?v=0.4.0" width="440" alt="Auxmo output panel with speaker and headphone controls, independent Chrome and Music volumes, and per-app route buttons" /></a>
 </p>
 <p align="center"><sub>UI previews use sample devices and apps rendered by Auxmo 0.4.0, not a live audio session. <a href="docs/images/README.md">Image sources</a>.</sub></p>
 
@@ -30,7 +30,7 @@
 
 Start with volume and mute. Enable multi-device output, effects, or headphone controls in Settings when you need them; these features are off by default.
 
-Need a fast, clean silence? **Mute All** temporarily silences app audio observed by Auxmo, including apps that start playing while safety mute is active. Turning it off restores each app's own mute state instead of clearing every setting.
+Need a fast, clean silence? Use **Mute All** at the top-right of the main panel. It temporarily silences app audio observed by Auxmo, including apps that start playing while safety mute is active. Turning it off restores each app's own mute state instead of clearing every setting.
 
 ## Core features
 
@@ -39,24 +39,24 @@ Need a fast, clean silence? **Mute All** temporarily silences app audio observed
 <td width="50%" valign="top">
 <h3>Mix apps independently</h3>
 <p>Give Chrome and Music different volumes, mute either app, and see live levels while the panel is open.</p>
-<a href="docs/images/mixer-en.png"><img src="docs/images/mixer-en.png" width="440" alt="Separate Chrome and Music volume sliders with effects and routing buttons" /></a>
+<a href="docs/images/mixer-en.png"><img src="docs/images/mixer-en.png?v=0.4.0" width="440" alt="Separate Chrome and Music volume sliders with effects and routing buttons" /></a>
 </td>
 <td width="50%" valign="top">
 <h3>Choose more than one output</h3>
 <p>Build a speaker-and-headphone group, keep individual device controls, and choose a different subset for each app.</p>
-<a href="docs/images/outputs-en.png"><img src="docs/images/outputs-en.png" width="440" alt="Multi-device output editor with speakers and AirPods Pro selected" /></a>
+<a href="docs/images/outputs-en.png"><img src="docs/images/outputs-en.png?v=0.4.0" width="440" alt="Multi-device output editor with speakers and AirPods Pro selected" /></a>
 </td>
 </tr>
 <tr>
 <td width="50%" valign="top">
 <h3>Shape each app's sound</h3>
 <p>A 10-band EQ, spatial effects, volume leveling, and channel controls. Save presets and compare with the original.</p>
-<a href="docs/images/effects-en.png"><img src="docs/images/effects-en.png" width="440" alt="Music effects window showing the ten-band equalizer, response preview, and Compare Original control" /></a>
+<a href="docs/images/effects-en.png"><img src="docs/images/effects-en.png?v=0.4.0" width="440" alt="Music effects window showing the ten-band equalizer, response preview, and Compare Original control" /></a>
 </td>
 <td width="50%" valign="top">
 <h3>Keep headphone controls nearby</h3>
 <p>Check battery levels and change the listening modes your exact model exposes. Controls vary by device and firmware.</p>
-<a href="docs/images/headphones-en.png"><img src="docs/images/headphones-en.png" width="440" alt="Example headphone battery readings with noise cancellation, transparency, and adaptive controls" /></a>
+<a href="docs/images/headphones-en.png"><img src="docs/images/headphones-en.png?v=0.4.0" width="440" alt="Example headphone battery readings with noise cancellation, transparency, and adaptive controls" /></a>
 </td>
 </tr>
 </table>
@@ -66,7 +66,7 @@ Need a fast, clean silence? **Mute All** temporarily silences app audio observed
 Browser audio on the speakers. Music on the headphones. With both devices connected:
 
 <p align="center">
-  <img src="docs/images/routing-en.svg" width="820" alt="Routing example: Chrome passes through Auxmo to speakers; Music passes through Auxmo to headphones. Both devices belong to the same output group." />
+  <img src="docs/images/routing-en.svg?v=0.4.0" width="820" alt="Routing example: Chrome passes through Auxmo to speakers; Music passes through Auxmo to headphones. Both devices belong to the same output group." />
 </p>
 
 1. In Settings, enable **Show Multi-Device Output**.

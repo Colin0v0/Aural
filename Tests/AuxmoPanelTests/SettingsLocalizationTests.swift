@@ -36,5 +36,9 @@ struct SettingsLocalizationTests {
         // 当前设置页有多组布尔控件；至少全部出现一次，才能证明语言环境确实传到了子视图。
         #expect(renderedText.filter { $0 == "Off" }.count >= 3)
         #expect(renderedText.filter { $0 == "On" }.count >= 3)
+        // 诊断分组只保留日志导出；更新暂存恢复不再作为用户可见的设置入口。
+        #expect(renderedText.contains { $0.contains("Export Diagnostics") })
+        #expect(!renderedText.contains { $0.contains("Update remnants") })
+        #expect(!renderedText.contains { $0.contains("Inspect and Clean") })
     }
 }
