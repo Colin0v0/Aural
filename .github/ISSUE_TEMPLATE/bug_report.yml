@@ -21,9 +21,9 @@ body:
   - type: input
     id: version
     attributes:
-      label: Aural version / Aural 版本
+      label: Auxmo version / Auxmo 版本
       description: Copy the version shown in the panel or diagnostic report. / 填写面板或诊断报告中的实际版本。
-      placeholder: 0.3.9 (36)
+      placeholder: 0.4.0 (40)
     validations:
       required: true
   - type: textarea

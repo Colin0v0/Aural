@@ -30,7 +30,7 @@ jobs:
       - name: 完整检查
         run: ./Scripts/check-ci.sh
       - name: 验证 DMG 与旧版更新 ZIP
-        run: AURAL_DMG_LAYOUT=plain ./Scripts/build-release-assets.sh
+        run: AUXMO_DMG_LAYOUT=plain ./Scripts/build-release-assets.sh
 
   detect:
     if: github.event_name == 'push'
@@ -94,7 +94,7 @@ jobs:
         run: |
           set -euo pipefail
           git fetch --tags --force
-          SOURCE_VERSION="$(sed -n 's/.*public static let current = "\([^"]*\)".*/\1/p' Sources/AuralCore/AuralVersion.swift)"
+          SOURCE_VERSION="$(sed -n 's/.*public static let current = "\([^"]*\)".*/\1/p' Sources/AuxmoCore/AuxmoVersion.swift)"
           PLIST_VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' Resources/Info.plist)"
           if [[ "$SOURCE_VERSION" != "$VERSION" || "$PLIST_VERSION" != "$VERSION" ]]; then
             echo "版本不一致：分支 $VERSION，源码 $SOURCE_VERSION，Info.plist $PLIST_VERSION" >&2
@@ -122,11 +122,11 @@ jobs:
           VERSION: ${{ needs.detect.outputs.version }}
         run: |
           set -euo pipefail
-          AURAL_DMG_LAYOUT=plain ./Scripts/build-release-assets.sh
-          DMG="dist/releases/${VERSION}/arm64/Aural-${VERSION}-macOS-arm64.dmg"
+          AUXMO_DMG_LAYOUT=plain ./Scripts/build-release-assets.sh
+          DMG="dist/releases/${VERSION}/arm64/Auxmo-${VERSION}-macOS-arm64.dmg"
           test -f "$DMG"
           test -f "$DMG.sha256"
-          ZIP="dist/releases/${VERSION}/arm64/Aural-${VERSION}-macOS-arm64.zip"
+          ZIP="dist/releases/${VERSION}/arm64/Auxmo-${VERSION}-macOS-arm64.zip"
           test -f "$ZIP"
           test -f "$ZIP.sha256"
           echo "dmg=$DMG" >> "$GITHUB_OUTPUT"
@@ -150,7 +150,7 @@ jobs:
           git tag "$TAG"
           git push origin "$TAG"
           gh release create "$TAG" "$DMG" "$DMG.sha256" "$ZIP" "$ZIP.sha256" \
-            --title "Aural $VERSION" \
+            --title "Auxmo $VERSION" \
             --notes-file "$NOTES" \
             --latest \
             --verify-tag

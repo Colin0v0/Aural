@@ -1,6 +1,6 @@
 # README image sources / 图片来源
 
-The PNGs are native renders of Aural's current SwiftUI/AppKit views using the in-memory fixture in [`ReadmePreviewTests.swift`](../../Tests/AuralPanelTests/ReadmePreviewTests.swift). They are **UI previews, not captures of a live playback session or proof of hardware compatibility**. Device names, app identities, volume values, battery values, and control replies are illustrative.
+The PNGs are native renders of Auxmo's current SwiftUI/AppKit views using the in-memory fixture in [`ReadmePreviewTests.swift`](../../Tests/AuxmoPanelTests/ReadmePreviewTests.swift). They are **UI previews, not captures of a live playback session or proof of hardware compatibility**. Device names, app identities, volume values, battery values, and control replies are illustrative.
 
 - `hero-{en,zh}.png`: the actual `AudioPanel` with a two-member group and two example apps.
 - `mixer-{en,zh}.png`: `ApplicationVolumeSection`.
@@ -15,7 +15,7 @@ Regenerate the PNGs on macOS with the Swift 6 toolchain:
 ./Scripts/render-readme-previews.sh
 ```
 
-The script runs the preview test in a separate process for each language and copies its output to this folder. It overrides preferences only in that process's volatile arguments domain. It does not modify saved Aural preferences, play/capture audio, connect Bluetooth devices, or change the host's output route. Ordinary test runs skip this explicit documentation export; existing regression tests are unchanged.
+The script runs the preview test in a separate process for each language and copies its output to this folder. It overrides preferences only in that process's volatile arguments domain. It does not modify saved Auxmo preferences, play/capture audio, connect Bluetooth devices, or change the host's output route. Ordinary test runs skip this explicit documentation export; existing regression tests are unchanged.
 
 When updating images, inspect both languages, check the UI version, and retain this provenance note. Do not use a fixture image as a device verification result.
 

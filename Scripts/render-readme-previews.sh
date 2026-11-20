@@ -7,10 +7,10 @@ TESTING_PLUGIN="$TOOLCHAIN_USR/lib/swift/host/plugins/testing/libTestingMacros.d
 test -f "$TESTING_PLUGIN"
 swift build --build-tests -Xswiftc -load-plugin-library -Xswiftc "$TESTING_PLUGIN"
 ./Scripts/prepare-test-resources.sh
-OUTPUT_DIR="$(mktemp -d -t aural-readme-render)"
+OUTPUT_DIR="$(mktemp -d -t auxmo-readme-render)"
 trap 'rm -rf "$OUTPUT_DIR"' EXIT
 for language in en zh; do
-    AURAL_RENDER_README=1 AURAL_README_LANGUAGE="$language" AURAL_README_OUTPUT_DIR="$OUTPUT_DIR" \
+    AUXMO_RENDER_README=1 AUXMO_README_LANGUAGE="$language" AUXMO_README_OUTPUT_DIR="$OUTPUT_DIR" \
         swift test --skip-build --no-parallel --filter ReadmePreviewTests \
         -Xswiftc -load-plugin-library -Xswiftc "$TESTING_PLUGIN"
 done

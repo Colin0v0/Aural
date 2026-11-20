@@ -4,12 +4,12 @@ cd "$(dirname "$0")/.."
 
 # DMG 是主要安装包；ZIP 是旧版更新器的明确协议格式，不是新客户端的下载降级路径。
 ./Scripts/build-dmg.sh
-APP="${AURAL_BUILD_OUTPUT_ROOT:-dist/build}/${AURAL_BUILD_CONFIGURATION:-release}/Aural.app"
+APP="${AUXMO_BUILD_OUTPUT_ROOT:-dist/build}/${AUXMO_BUILD_CONFIGURATION:-release}/Auxmo.app"
 VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP/Contents/Info.plist")"
 ARCH="$(uname -m)"
 OUTPUT_DIR="dist/releases/$VERSION/$ARCH"
-DMG="$OUTPUT_DIR/Aural-${VERSION}-macOS-${ARCH}.dmg"
-ZIP="$OUTPUT_DIR/Aural-${VERSION}-macOS-${ARCH}.zip"
+DMG="$OUTPUT_DIR/Auxmo-${VERSION}-macOS-${ARCH}.dmg"
+ZIP="$OUTPUT_DIR/Auxmo-${VERSION}-macOS-${ARCH}.zip"
 rm -f "$ZIP"
 /usr/bin/ditto -c -k --sequesterRsrc --keepParent "$APP" "$ZIP"
 # SHA-256 文件必须能直接放到用户下载目录执行，因此只记录资产文件名。
@@ -19,7 +19,7 @@ rm -f "$ZIP"
 )
 
 # 更新包必须同时验证标准 bundle 结构、外层签名和真实启动，避免再次发布启动即崩溃的安装包。
-CHECK="$(mktemp -d "${TMPDIR:-/tmp}/aural-legacy-zip.XXXXXX")"
+CHECK="$(mktemp -d "${TMPDIR:-/tmp}/auxmo-legacy-zip.XXXXXX")"
 DMG_MOUNT=""
 DMG_ATTACHED=0
 PRESERVE_CHECK=0
@@ -38,29 +38,29 @@ trap cleanup EXIT
 
 verify_app() {
     local candidate="$1"
-    local resource_bundle="$candidate/Contents/Resources/Aural_Aural.bundle"
+    local resource_bundle="$candidate/Contents/Resources/Auxmo_Auxmo.bundle"
     test -f "$candidate/Contents/Info.plist"
-    test -x "$candidate/Contents/MacOS/Aural"
+    test -x "$candidate/Contents/MacOS/Auxmo"
     test -f "$resource_bundle/Contents/Info.plist"
-    test -f "$resource_bundle/Contents/Resources/AuralMarkTemplate.png"
+    test -f "$resource_bundle/Contents/Resources/AuxmoMarkTemplate.png"
     test "$(plutil -extract CFBundlePackageType raw -o - \
         "$resource_bundle/Contents/Info.plist")" == "BNDL"
     test "$(plutil -extract CFBundleIdentifier raw -o - \
-        "$resource_bundle/Contents/Info.plist")" == "aural.Aural.resources"
-    cmp Sources/Aural/Resources/AuralMarkTemplate.png \
-        "$resource_bundle/Contents/Resources/AuralMarkTemplate.png"
+        "$resource_bundle/Contents/Info.plist")" == "com.colin0v0.auxmo.resources"
+    cmp Sources/Auxmo/Resources/AuxmoMarkTemplate.png \
+        "$resource_bundle/Contents/Resources/AuxmoMarkTemplate.png"
     codesign --verify --deep --strict "$candidate"
-    "$candidate/Contents/MacOS/Aural" --diagnose-resources >/dev/null
+    "$candidate/Contents/MacOS/Auxmo" --diagnose-resources >/dev/null
 }
 
 verify_app "$APP"
 
 # 用旧更新器相同的 ditto 解压方式验证根目录布局、资源结构和签名。
 /usr/bin/ditto -x -k "$ZIP" "$CHECK"
-test -d "$CHECK/Aural.app"
-cmp "$APP/Contents/Info.plist" "$CHECK/Aural.app/Contents/Info.plist"
-cmp "$APP/Contents/MacOS/Aural" "$CHECK/Aural.app/Contents/MacOS/Aural"
-verify_app "$CHECK/Aural.app"
+test -d "$CHECK/Auxmo.app"
+cmp "$APP/Contents/Info.plist" "$CHECK/Auxmo.app/Contents/Info.plist"
+cmp "$APP/Contents/MacOS/Auxmo" "$CHECK/Auxmo.app/Contents/MacOS/Auxmo"
+verify_app "$CHECK/Auxmo.app"
 (
     cd "$OUTPUT_DIR"
     shasum -a 256 -c "$(basename "$ZIP").sha256"

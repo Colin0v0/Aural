@@ -4,7 +4,7 @@
 
 ## What the current channel means
 
-Aural uses stable version tags and direct GitHub downloads. The current packages are **ad-hoc signed, without Developer ID signing or Apple notarization**. “Stable release” describes the update channel, not certification of every audio setup or Gatekeeper acceptance.
+Auxmo uses stable version tags and direct GitHub downloads. The current packages are **ad-hoc signed, without Developer ID signing or Apple notarization**. “Stable release” describes the update channel, not certification of every audio setup or Gatekeeper acceptance.
 
 Do not disable Gatekeeper or SIP to satisfy an installation test. Check [distribution and testing limits](TRUST_AND_TESTING.md).
 
@@ -17,7 +17,7 @@ Do not disable Gatekeeper or SIP to satisfy an installation test. Check [distrib
 - [ ] Review privacy claims, known limitations, [headphone evidence](HEADPHONE_COMPATIBILITY.md), and third-party notices.
 - [ ] Record which exact physical devices and scenarios were tested. Do not turn unrun checklist items into pass claims.
 
-Local apps are separated into `dist/build/debug/Aural.app` and `dist/build/release/Aural.app`. Release assets are under `dist/releases/<version>/<arch>/`; filenames and checksum contents remain unchanged. Use `AURAL_PREVIEW_BUILD=1` for local packaging tests that must not overwrite a versioned release asset. Finder layout is the default and must succeed; noninteractive CI explicitly sets `AURAL_DMG_LAYOUT=plain` and runs the same package verification.
+Local apps are separated into `dist/build/debug/Auxmo.app` and `dist/build/release/Auxmo.app`. Release assets are under `dist/releases/<version>/<arch>/`; filenames and checksum contents remain unchanged. Use `AUXMO_PREVIEW_BUILD=1` for local packaging tests that must not overwrite a versioned release asset. Finder layout is the default and must succeed; noninteractive CI explicitly sets `AUXMO_DMG_LAYOUT=plain` and runs the same package verification.
 
 ## Hardware acceptance
 

@@ -1,6 +1,6 @@
 # Headphone compatibility and community testing
 
-Aural does not claim that every model from a supported brand works. Headphone
+Auxmo does not claim that every model from a supported brand works. Headphone
 firmware changes frequently, and several vendors use more than one control
 protocol within the same product family.
 
@@ -11,8 +11,8 @@ appear in the model catalog before it appears as verified support.
 
 | Status | Meaning |
 | --- | --- |
-| **Verified** | The current Aural build was tested on the exact model. |
-| **Upstream verified** | The protocol was tested on the exact model by the upstream project, but Aural still needs an independent check. |
+| **Verified** | The current Auxmo build was tested on the exact model. |
+| **Upstream verified** | The protocol was tested on the exact model by the upstream project, but Auxmo still needs an independent check. |
 | **Community tested** | A contributor tested the exact model and reported the result. |
 | **Experimental** | The model or protocol family is recognized, but the exact model has not been hardware-validated. |
 | **Planned** | No working control adapter is shipped yet. |
@@ -44,12 +44,12 @@ protocol response. A model name alone never enables battery or noise controls.
 | Sennheiser ACCENTUM Wireless | Qualcomm GAIA over RFCOMM | Single device | Off, cancellation, transparency | Upstream verified |
 | Fast Pair battery extension | Google Fast Pair | Planned | Optional hearables extension | Planned |
 
-“Protocol-dependent” means Aural waits for a real device reply before showing a
+“Protocol-dependent” means Auxmo waits for a real device reply before showing a
 control. It is not a claim that every model in that list is compatible.
 
 Sony V1/V2 is selected from the SDP service exposed by the connected device.
 V2 battery uses `22 00 -> 23 00 <level> <charging>` only after the V2 service
-and the 8-byte init reply are confirmed. Aural never sends that query to a
+and the 8-byte init reply are confirmed. Auxmo never sends that query to a
 V1-only service, where `0x22` has a different meaning. Apple modes are read
 from `lstm`/`lsms`; Off is the system's raw mode `1`, while cancellation,
 transparency, and adaptive are exposed only when their capability bits are set.
@@ -65,22 +65,22 @@ Aware are the two exposed presets; the UI does not invent an Off mode or map
 Immersion to either.
 
 The earbud battery records identify right (`1`), left (`2`), and case (`3`).
-Aural does not use combined buds (`4`) to fill missing component values or infer
+Auxmo does not use combined buds (`4`) to fill missing component values or infer
 charging or wear state. A valid new reading replaces the previous component
 snapshot, so unavailable parts do not retain stale percentages. Other Bose
 models still require separate protocol work. The four listed products have
-upstream hardware evidence; Aural has not completed independent Bose hardware
+upstream hardware evidence; Auxmo has not completed independent Bose hardware
 acceptance.
 
 AirPods Max is treated as an over-ear Apple device, not as a pair of earbuds.
-When the HAL does not expose active in-ear placement, Aural does not use
+When the HAL does not expose active in-ear placement, Auxmo does not use
 `unknown` placement to hide listening modes. If the system report provides only
 `device_batteryLevelMain`, that value is shown as a single battery; left,
 right, and case values are not synthesized. Earbuds with active ear detection
 continue to require both ears for mode changes.
 
 Sennheiser ACCENTUM Wireless uses the GAIA V3 RFCOMM service UUID
-`a2129ff3-081b-4c45-8afe-469d9c4842ec`. Aural verifies the exact `ACAEBT`
+`a2129ff3-081b-4c45-8afe-469d9c4842ec`. Auxmo verifies the exact `ACAEBT`
 model response and derives the visible mode from independent ANC and
 transparency toggles. ACCENTUM Plus, ACCENTUM True Wireless, and MOMENTUM 4
 are not mapped to these commands without separate capture evidence.
@@ -93,12 +93,12 @@ protocol and the device identity join are proven on macOS.
 | Candidate | Current blocker |
 | --- | --- |
 | JBL Tune Flex 2 / JBL GATT family | The ANC protocol is documented by the MIT-licensed JblTray project, but macOS public CoreBluetooth does not expose the BLE MAC used to prove that a GATT peripheral is the same device as the selected Core Audio output. A name-only match is not acceptable. |
-| Huawei FreeBuds / FreeBuds Studio | No verified Aural implementation yet; each family needs its control transport, product identity, battery layout, and mode readback captured independently. |
+| Huawei FreeBuds / FreeBuds Studio | No verified Auxmo implementation yet; each family needs its control transport, product identity, battery layout, and mode readback captured independently. |
 | Xiaomi / Redmi Buds | Same requirement as Huawei; model-name matching alone cannot establish a safe control channel. |
 | vivo TWS | Same requirement; no verified channel or capability table is included in this build. |
 
 Apple headphone support is capability-driven through the HAL. AirPods Max
-hardware still needs independent Aural acceptance even though the no-wear-gate
+hardware still needs independent Auxmo acceptance even though the no-wear-gate
 and single-battery paths are now covered by simulator tests.
 
 ## Reporting a new model
@@ -111,7 +111,7 @@ Please open a GitHub issue with the `headphone-compatibility` label and include:
 4. Battery readings tested (single value, left, right, charging case).
 5. Every noise mode tested and whether switching back to the original mode worked.
 6. Bluetooth SDP UUIDs or GATT services if available.
-7. The output of **Copy Headphone Diagnostics** from Aural's menu, with private
+7. The output of **Copy Headphone Diagnostics** from Auxmo's menu, with private
    addresses or names removed if necessary.
 
 Useful reports also mention reconnect behavior after:
@@ -120,7 +120,7 @@ Useful reports also mention reconnect behavior after:
 - disconnecting and reconnecting Bluetooth;
 - sleeping and waking the Mac;
 - changing the macOS audio output;
-- switching between the vendor app and Aural.
+- switching between the vendor app and Auxmo.
 
 ## Maintainer checklist
 
@@ -133,6 +133,6 @@ When adding a model:
 - Update this matrix and the README summary.
 - Mark the result as experimental until a real hardware report exists.
 
-Protocol research may use GPL-licensed projects as facts, but Aural must not copy
+Protocol research may use GPL-licensed projects as facts, but Auxmo must not copy
 their source code. MIT-compatible implementations can be adapted with the
 required notices in `THIRD_PARTY_NOTICES.md`.

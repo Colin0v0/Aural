@@ -2,7 +2,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-# Xcode 16.4 的 SwiftPM 会把资源包放在 AuralPackageTests.xctest 旁边，
+# Xcode 16.4 的 SwiftPM 会把资源包放在 AuxmoPackageTests.xctest 旁边，
 # 而当前 CLT 会把它放进 .xctest/Contents/Resources。
 # 测试前统一按标准 macOS bundle 布局写入测试宿主，让生产代码只保留一个资源入口。
 BIN_DIR="$(swift build --show-bin-path)"
@@ -10,11 +10,11 @@ FOUND_TEST_BUNDLE=false
 while IFS= read -r -d '' TEST_BUNDLE; do
     FOUND_TEST_BUNDLE=true
     RESOURCE_ROOT="$TEST_BUNDLE/Contents/Resources"
-    RESOURCE_BUNDLE="$RESOURCE_ROOT/Aural_Aural.bundle"
+    RESOURCE_BUNDLE="$RESOURCE_ROOT/Auxmo_Auxmo.bundle"
     rm -rf "$RESOURCE_BUNDLE"
     mkdir -p "$RESOURCE_BUNDLE/Contents/Resources"
-    cp Resources/Aural_Aural.bundle/Contents/Info.plist "$RESOURCE_BUNDLE/Contents/Info.plist"
-    cp -R Sources/Aural/Resources/. "$RESOURCE_BUNDLE/Contents/Resources/"
+    cp Resources/Auxmo_Auxmo.bundle/Contents/Info.plist "$RESOURCE_BUNDLE/Contents/Info.plist"
+    cp -R Sources/Auxmo/Resources/. "$RESOURCE_BUNDLE/Contents/Resources/"
     # 修改测试宿主内容后重新做临时签名，避免签名封条与新增资源不一致。
     codesign --force --sign - "$TEST_BUNDLE"
 done < <(find "$BIN_DIR" -maxdepth 1 -type d -name '*.xctest' -print0)

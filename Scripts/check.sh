@@ -14,9 +14,9 @@ swift build --build-tests -Xswiftc -load-plugin-library -Xswiftc "$TESTING_PLUGI
 ./Scripts/prepare-test-resources.sh
 swift test --skip-build --no-parallel -Xswiftc -load-plugin-library -Xswiftc "$TESTING_PLUGIN"
 ./Scripts/build-app.sh
-APP="${AURAL_BUILD_OUTPUT_ROOT:-dist/build}/${AURAL_BUILD_CONFIGURATION:-debug}/Aural.app"
+APP="${AUXMO_BUILD_OUTPUT_ROOT:-dist/build}/${AUXMO_BUILD_CONFIGURATION:-debug}/Auxmo.app"
 codesign --verify --strict "$APP"
-"$APP/Contents/MacOS/Aural" --diagnose
+"$APP/Contents/MacOS/Auxmo" --diagnose
 
 # 麦克风诊断只读硬件属性，不录音、不切换输入、不写入增益。
-"$APP/Contents/MacOS/Aural" --diagnose-inputs
+"$APP/Contents/MacOS/Auxmo" --diagnose-inputs

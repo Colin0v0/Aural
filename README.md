@@ -1,34 +1,36 @@
 <p align="center">
-  <img src="Resources/AppIcon-1024.png" width="96" height="96" alt="Aural app icon" />
+  <img src="Resources/AppIcon-1024.png" width="96" height="96" alt="Auxmo app icon" />
 </p>
-<h1 align="center">Aural</h1>
+<h1 align="center">Auxmo</h1>
 <p align="center"><strong>Your Mac. Your Sound. Your Rules.</strong></p>
 <p align="center">Per-app volume, audio routing, and headphone controls. Right in your menu bar.</p>
 <p align="center"><strong>English</strong> · <a href="README.zh-CN.md">简体中文</a></p>
 <p align="center">
-  <a href="https://github.com/Colin0v0/Aural/releases/latest"><img src="https://img.shields.io/github/v/release/Colin0v0/Aural" alt="Latest release" /></a>
+  <a href="https://github.com/Colin0v0/Auxmo/releases/latest"><img src="https://img.shields.io/github/v/release/Colin0v0/Auxmo" alt="Latest release" /></a>
   <img src="https://img.shields.io/badge/macOS-15.4%2B-000000?logo=apple&amp;logoColor=white" alt="macOS 15.4 or later" />
   <img src="https://img.shields.io/badge/Apple_Silicon-arm64-555555" alt="Apple Silicon arm64" />
-  <a href="https://github.com/Colin0v0/Aural/actions/workflows/release.yml"><img src="https://github.com/Colin0v0/Aural/actions/workflows/release.yml/badge.svg?branch=main" alt="Release checks" /></a>
+  <a href="https://github.com/Colin0v0/Auxmo/actions/workflows/release.yml"><img src="https://github.com/Colin0v0/Auxmo/actions/workflows/release.yml/badge.svg?branch=main" alt="Release checks" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue" alt="MIT License" /></a>
 </p>
 <p align="center">
-  <a href="https://github.com/Colin0v0/Aural/releases/latest"><strong>Download for Apple Silicon</strong></a> ·
+  <a href="https://github.com/Colin0v0/Auxmo/releases/latest"><strong>Download for Apple Silicon</strong></a> ·
   <a href="#compatibility--installation">Before you install</a> ·
   <a href="docs/CHANGELOG.md">What's changed</a>
 </p>
 <p align="center">
-  <a href="docs/images/hero-en.png"><img src="docs/images/hero-en.png" width="440" alt="Aural output panel with speaker and headphone controls, independent Chrome and Music volumes, and per-app route buttons" /></a>
+  <a href="docs/images/hero-en.png"><img src="docs/images/hero-en.png" width="440" alt="Auxmo output panel with speaker and headphone controls, independent Chrome and Music volumes, and per-app route buttons" /></a>
 </p>
-<p align="center"><sub>UI previews use sample devices and apps rendered by Aural 0.3.9, not a live audio session. <a href="docs/images/README.md">Image sources</a>.</sub></p>
+<p align="center"><sub>UI previews use sample devices and apps rendered by Auxmo 0.4.0, not a live audio session. <a href="docs/images/README.md">Image sources</a>.</sub></p>
 
 > Free and open source. No account required. Current downloads are ad-hoc signed and **not notarized by Apple**; macOS may block launch. [Distribution details](docs/TRUST_AND_TESTING.md#distribution-and-permissions).
 
-## Why Aural?
+## Why Auxmo?
 
-**Turn down your browser without turning down your music.** Aural puts separate app volumes and output choices in one menu bar panel, so you don't have to keep opening player controls or macOS Sound settings.
+**Turn down your browser without turning down your music.** Auxmo puts separate app volumes and output choices in one menu bar panel, so you don't have to keep opening player controls or macOS Sound settings.
 
 Start with volume and mute. Enable multi-device output, effects, or headphone controls in Settings when you need them; these features are off by default.
+
+Need a fast, clean silence? **Mute All** temporarily silences app audio observed by Auxmo, including apps that start playing while safety mute is active. Turning it off restores each app's own mute state instead of clearing every setting.
 
 ## Core features
 
@@ -64,7 +66,7 @@ Start with volume and mute. Enable multi-device output, effects, or headphone co
 Browser audio on the speakers. Music on the headphones. With both devices connected:
 
 <p align="center">
-  <img src="docs/images/routing-en.svg" width="820" alt="Routing example: Chrome passes through Aural to speakers; Music passes through Aural to headphones. Both devices belong to the same output group." />
+  <img src="docs/images/routing-en.svg" width="820" alt="Routing example: Chrome passes through Auxmo to speakers; Music passes through Auxmo to headphones. Both devices belong to the same output group." />
 </p>
 
 1. In Settings, enable **Show Multi-Device Output**.
@@ -73,7 +75,7 @@ Browser audio on the speakers. Music on the headphones. With both devices connec
 
 An app can also use **All Outputs** to follow the whole group. Per-app choices apply within the current group, not to arbitrary disconnected devices. The illustration shows the intended configuration, not a hardware test result.
 
-> **Custom routing is not system-wide privacy isolation.** In 0.3.9, when all selected targets are unavailable, Aural pauses that app’s replay and retains mute capture instead of using other group outputs. The player’s timeline is not paused. This does not cover quitting Aural, permission revocation, or every hardware transition. Older releases such as 0.3.8 may use other group outputs. [Behavior and limits](docs/TRUST_AND_TESTING.md#known-limits).
+> **Custom routing is not system-wide privacy isolation.** In 0.4.0, when all selected targets are unavailable, Auxmo pauses that app’s replay and retains mute capture instead of using other group outputs. The player’s timeline is not paused. This does not cover quitting Auxmo, permission revocation, or every hardware transition. Older releases such as 0.3.8 may use other group outputs. [Behavior and limits](docs/TRUST_AND_TESTING.md#known-limits).
 
 ## Compatibility / installation
 
@@ -81,15 +83,15 @@ An app can also use **All Outputs** to follow the whole group. Per-app choices a
 | --- | --- |
 | Mac | Apple Silicon, macOS **15.4 or later**. Intel release builds are not provided. |
 | Headphones | Selected models from **Apple / Beats, Bowers & Wilkins, Sony, OPPO, Bose, and Sennheiser**. Brand recognition does not mean every model is supported. |
-| Evidence | Many listed models are **upstream verified** or **experimental**, not independently verified in Aural. See the [model-by-model matrix](docs/HEADPHONE_COMPATIBILITY.md). |
+| Evidence | Many listed models are **upstream verified** or **experimental**, not independently verified in Auxmo. See the [model-by-model matrix](docs/HEADPHONE_COMPATIBILITY.md). |
 | Permissions | System audio recording for app processing; Bluetooth for headphone controls. The microphone page controls hardware settings, not microphone recording. |
 
 ### Install
 
-1. Download the arm64 DMG from [GitHub Releases](https://github.com/Colin0v0/Aural/releases/latest).
-2. Open it and drag Aural into **Applications**. Quit an older running copy before replacing it.
-3. Launch Aural and follow the system permission prompts. The current startup flow requires system audio recording access to enter the main interface.
-4. Play audio in an app, then open Aural from the menu bar. Optional features are in Settings.
+1. Download the arm64 DMG from [GitHub Releases](https://github.com/Colin0v0/Auxmo/releases/latest).
+2. Open it and drag Auxmo into **Applications**. Quit an older running copy before replacing it.
+3. Launch Auxmo and follow the system permission prompts. The current startup flow requires system audio recording access to enter the main interface.
+4. Play audio in an app, then open Auxmo from the menu bar. Optional features are in Settings.
 
 Release assets include SHA-256 files. Current builds are ad-hoc signed, without Developer ID signing or Apple notarization. Follow macOS security prompts; this project does not ask you to disable Gatekeeper or SIP.
 
@@ -104,7 +106,7 @@ Release assets include SHA-256 files. Current builds are ad-hoc signed, without 
 
 ### Local audio, explicit diagnostics
 
-Audio processing stays on your Mac. Aural does not save recordings, upload audio, require an account, or collect telemetry. It contacts GitHub to check for updates and download releases.
+Audio processing stays on your Mac. Auxmo does not save recordings, upload audio, require an account, or collect telemetry. It contacts GitHub to check for updates and download releases.
 
 When something goes wrong, use **Settings → Diagnostics → Export Diagnostics…**. The JSON report stays local until you share it. It contains current audio state and recent in-memory events, not audio samples. Device names, UIDs, Bluetooth addresses, and application identities can be included; review the file before posting it publicly.
 
@@ -113,13 +115,13 @@ When something goes wrong, use **Settings → Diagnostics → Export Diagnostics
 Requires a Swift 6 toolchain and macOS 15.4 or later:
 
 ```sh
-git clone https://github.com/Colin0v0/Aural.git
-cd Aural
+git clone https://github.com/Colin0v0/Auxmo.git
+cd Auxmo
 ./Scripts/check.sh
-open dist/build/debug/Aural.app
+open dist/build/debug/Auxmo.app
 ```
 
-`check.sh` runs tests, builds the app, checks the local signature, and reads output/input diagnostics on the host Mac. Hardware-independent release checks run in [GitHub Actions](https://github.com/Colin0v0/Aural/actions/workflows/release.yml). A green build is evidence of those checks, not Apple certification or complete hardware acceptance.
+`check.sh` runs tests, builds the app, checks the local signature, and reads output/input diagnostics on the host Mac. Hardware-independent release checks run in [GitHub Actions](https://github.com/Colin0v0/Auxmo/actions/workflows/release.yml). A green build is evidence of those checks, not Apple certification or complete hardware acceptance.
 
 | Read more | |
 | --- | --- |
@@ -130,4 +132,4 @@ open dist/build/debug/Aural.app
 | [Release checklist](docs/RELEASING.md) · [Changelog](docs/CHANGELOG.md) | Packaging requirements and the fixes shipped in each version |
 | [Third-party notices](THIRD_PARTY_NOTICES.md) · [MIT License](LICENSE) | Code origins and license terms |
 
-Found a problem? [Open an issue](https://github.com/Colin0v0/Aural/issues/new?template=bug_report.yml) with your version, exact devices, and steps to reproduce. Attach a diagnostic report only after removing private information. For the UI previews above, see the [reproducible image sources](docs/images/README.md).
+Found a problem? [Open an issue](https://github.com/Colin0v0/Auxmo/issues/new?template=bug_report.yml) with your version, exact devices, and steps to reproduce. Attach a diagnostic report only after removing private information. For the UI previews above, see the [reproducible image sources](docs/images/README.md).

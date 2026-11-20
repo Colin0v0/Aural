@@ -4,16 +4,16 @@
 
 ## What the permission is for
 
-Per-app volume, mute, output routing, effects, and levels use a Core Audio Process Tap. Aural needs system audio recording access to read those app streams; it processes them locally and does not save recordings. Tap creation or a successful callback is not proof of authorization or valid audio. Silence is not evidence of denial either.
+Per-app volume, mute, output routing, effects, and levels use a Core Audio Process Tap. Auxmo needs system audio recording access to read those app streams; it processes them locally and does not save recordings. Tap creation or a successful callback is not proof of authorization or valid audio. Silence is not evidence of denial either.
 
 The microphone page reads and changes input-device hardware properties. It does not create a microphone recording session.
 
 ## Current startup behavior
 
-The source of truth is [StartupPermissions.swift](../Sources/Aural/App/StartupPermissions.swift) and [AuralApp.swift](../Sources/Aural/App/AuralApp.swift):
+The source of truth is [StartupPermissions.swift](../Sources/Auxmo/App/StartupPermissions.swift) and [AuxmoApp.swift](../Sources/Auxmo/App/AuxmoApp.swift):
 
 - Read the current authorization status on startup, not just an “asked before” preference. Either an explicit system-audio grant or a screen-capture grant is accepted for app-audio access.
-- When access is not authorized, request it once through macOS. The system decides whether to display a prompt; Aural does not modify TCC permissions itself.
+- When access is not authorized, request it once through macOS. The system decides whether to display a prompt; Auxmo does not modify TCC permissions itself.
 - On an explicit refusal, offer **Open System Settings** or **Quit**. Neither path enters the main interface or leaves an unusable background instance.
 - When the current request has just granted access, relaunch the current app bundle to avoid a stale preflight value overriding the system callback.
 - If the query API is unavailable or initialization fails, stop startup rather than assuming authorization.
@@ -22,7 +22,7 @@ After startup, permission is rechecked when the panel opens, the app becomes act
 
 ## Non-public API dependency
 
-macOS does not provide a public Process Tap authorization query. Aural isolates `TCCAccessPreflight`, `TCCAccessRequest`, and related non-public TCC symbols in [SystemAudioCaptureAccess.swift](../Sources/AuralCore/SystemAudioCaptureAccess.swift). It does not read the TCC database, scrape system logs, or switch authorization backends if those symbols are missing.
+macOS does not provide a public Process Tap authorization query. Auxmo isolates `TCCAccessPreflight`, `TCCAccessRequest`, and related non-public TCC symbols in [SystemAudioCaptureAccess.swift](../Sources/AuxmoCore/SystemAudioCaptureAccess.swift). It does not read the TCC database, scrape system logs, or switch authorization backends if those symbols are missing.
 
 This integration can break after a macOS update and is not a basis for claiming a public-API-only Mac App Store build. Queries and requests stay outside the real-time audio callback.
 
@@ -30,7 +30,7 @@ This integration can break after a macOS update and is not a basis for claiming 
 
 Tests inject permission states and callbacks. They cover denial, authorization, unavailable APIs, cancellation, reauthorization, and restart ordering—not the actual system dialog on every macOS version or actual device playback.
 
-Ad-hoc-signed updates may change code identity and affect saved permissions. Quit the older instance before replacing or launching a new build, and follow system prompts. Aural does not ask users to disable macOS security protections.
+Ad-hoc-signed updates may change code identity and affect saved permissions. Quit the older instance before replacing or launching a new build, and follow system prompts. Auxmo does not ask users to disable macOS security protections.
 
 ## 中文说明
 

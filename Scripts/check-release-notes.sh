@@ -63,7 +63,7 @@ fi
 
 # 当前源码版本必须已经有对应的正式文案，不能等合并 release 分支后才发现遗漏。
 SOURCE_VERSION="$(sed -n 's/.*public static let current = "\([^"]*\)".*/\1/p' \
-    Sources/AuralCore/AuralVersion.swift)"
+    Sources/AuxmoCore/AuxmoVersion.swift)"
 test -n "$SOURCE_VERSION"
 VERSION="$SOURCE_VERSION" ./Scripts/write-release-notes.sh >/dev/null
 

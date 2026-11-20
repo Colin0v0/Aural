@@ -2,21 +2,21 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-# 本地预览包默认使用 release 构建；仍可用 AURAL_BUILD_CONFIGURATION 显式指定 debug。
-CONFIGURATION="${AURAL_BUILD_CONFIGURATION:-release}"
-LAYOUT="${AURAL_DMG_LAYOUT:-finder}"
+# 本地预览包默认使用 release 构建；仍可用 AUXMO_BUILD_CONFIGURATION 显式指定 debug。
+CONFIGURATION="${AUXMO_BUILD_CONFIGURATION:-release}"
+LAYOUT="${AUXMO_DMG_LAYOUT:-finder}"
 case "$LAYOUT" in finder|plain) ;; *) echo "不支持的 DMG 布局：$LAYOUT" >&2; exit 1 ;; esac
 # PREVIEW_BUILD=1 只改最终包的显示版本，不改源码版本，避免本地预览冒充正式发布。
-PREVIEW_BUILD="${AURAL_PREVIEW_BUILD:-0}"
+PREVIEW_BUILD="${AUXMO_PREVIEW_BUILD:-0}"
 ARCH="$(uname -m)"
 case "$ARCH" in
     arm64|x86_64) ;;
     *) echo "不支持的处理器架构：$ARCH" >&2; exit 1 ;;
 esac
 
-AURAL_BUILD_CONFIGURATION="$CONFIGURATION" ./Scripts/build-app.sh
+AUXMO_BUILD_CONFIGURATION="$CONFIGURATION" ./Scripts/build-app.sh
 
-APP="${AURAL_BUILD_OUTPUT_ROOT:-dist/build}/$CONFIGURATION/Aural.app"
+APP="${AUXMO_BUILD_OUTPUT_ROOT:-dist/build}/$CONFIGURATION/Auxmo.app"
 VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP/Contents/Info.plist")"
 BUILD_NUMBER="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$APP/Contents/Info.plist")"
 if [[ "$PREVIEW_BUILD" == "1" ]]; then
@@ -28,14 +28,14 @@ if [[ "$PREVIEW_BUILD" == "1" ]]; then
     /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $VERSION" "$APP/Contents/Info.plist"
     /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $BUILD_NUMBER" "$APP/Contents/Info.plist"
     # 改过 Info.plist 后必须重签，否则外层签名不再覆盖最终信息。
-    codesign --force --sign - "$APP/Contents/Helpers/AuralUpdateHelper"
+    codesign --force --sign - "$APP/Contents/Helpers/AuxmoUpdateHelper"
     codesign --force --sign - "$APP"
 fi
 
 OUTPUT_DIR="dist/releases/$VERSION/$ARCH"
 mkdir -p "$OUTPUT_DIR"
-OUTPUT="$OUTPUT_DIR/Aural-${VERSION}-macOS-${ARCH}.dmg"
-STAGING="$(mktemp -d "${TMPDIR:-/tmp}/aural-dmg.XXXXXX")"
+OUTPUT="$OUTPUT_DIR/Auxmo-${VERSION}-macOS-${ARCH}.dmg"
+STAGING="$(mktemp -d "${TMPDIR:-/tmp}/auxmo-dmg.XXXXXX")"
 MOUNT_DIR=""
 PRESERVE_STAGING=0
 
@@ -56,16 +56,16 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# DMG 只放应用和 Applications 链接；用户打开后可直接把 Aural 拖进 Applications。
-mkdir -p "$STAGING/Aural"
-ditto "$APP" "$STAGING/Aural/Aural.app"
-ln -s /Applications "$STAGING/Aural/Applications"
+# DMG 只放应用和 Applications 链接；用户打开后可直接把 Auxmo 拖进 Applications。
+mkdir -p "$STAGING/Auxmo"
+ditto "$APP" "$STAGING/Auxmo/Auxmo.app"
+ln -s /Applications "$STAGING/Auxmo/Applications"
 
-RW_DMG="$STAGING/Aural-rw.dmg"
+RW_DMG="$STAGING/Auxmo-rw.dmg"
 # 挂载卷名故意带版本，避免系统中已有同名旧卷时 Finder 自动追加 " 1"，
 # 导致后续 AppleScript 找不到目标窗口、图标布局静默失效。
-VOLUME_NAME="Aural ${VERSION}"
-hdiutil create -quiet -srcfolder "$STAGING/Aural" -volname "$VOLUME_NAME" \
+VOLUME_NAME="Auxmo ${VERSION}"
+hdiutil create -quiet -srcfolder "$STAGING/Auxmo" -volname "$VOLUME_NAME" \
     -fs HFS+ -format UDRW -ov "$RW_DMG"
 
 # 必须挂到 /Volumes 下让 Finder 正常登记卷；挂到临时目录时 Finder 不把它当作 disk。
@@ -97,7 +97,7 @@ on run argv
             set viewOptions to the icon view options of container window
             set arrangement of viewOptions to not arranged
             set icon size of viewOptions to 112
-            set position of item "Aural.app" of container window to {150, 190}
+            set position of item "Auxmo.app" of container window to {150, 190}
             set position of item "Applications" of container window to {450, 190}
             update without registering applications
             delay 1
