@@ -2,7 +2,7 @@
 set -euo pipefail
 APP="$1"
 [[ -e "$APP" ]] || exit 0
-EXECUTABLE="$APP/Contents/MacOS/Aural"
+EXECUTABLE="$APP/Contents/MacOS/Auxmo"
 [[ -f "$EXECUTABLE" ]] || { echo "无法确认应用可执行文件，未移动任何文件：$APP" >&2; exit 1; }
 ERRORS="$(mktemp)"
 trap 'STATUS=$?; rm -f "$ERRORS"; exit "$STATUS"' EXIT

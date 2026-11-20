@@ -2,21 +2,21 @@
 import PackageDescription
 
 let package = Package(
-    name: "Aural",
+    name: "Auxmo",
     platforms: [.macOS("15.4")],
     products: [
-        .executable(name: "Aural", targets: ["Aural"]),
-        .executable(name: "AuralUpdateHelper", targets: ["AuralUpdateHelper"])
+        .executable(name: "Auxmo", targets: ["Auxmo"]),
+        .executable(name: "AuxmoUpdateHelper", targets: ["AuxmoUpdateHelper"])
     ],
     targets: [
-        .target(name: "AuralCore"),
-        .target(name: "AuralUpdateSupport"),
-        .executableTarget(name: "Aural", dependencies: ["AuralCore", "AuralUpdateSupport"], resources: [.process("Resources")]),
-        .executableTarget(name: "AuralUpdateHelper", dependencies: ["AuralUpdateSupport"]),
-        .testTarget(name: "AuralCoreTests", dependencies: ["AuralCore"]),
-        .testTarget(name: "AuralUpdateHelperTests", dependencies: ["AuralUpdateHelper"]),
-        .testTarget(name: "AuralUpdateSupportTests", dependencies: ["AuralUpdateSupport"]),
-        .testTarget(name: "AuralPanelTests", dependencies: ["Aural"])
+        .target(name: "AuxmoCore"),
+        .target(name: "AuxmoUpdateSupport"),
+        .executableTarget(name: "Auxmo", dependencies: ["AuxmoCore", "AuxmoUpdateSupport"], resources: [.process("Resources")]),
+        .executableTarget(name: "AuxmoUpdateHelper", dependencies: ["AuxmoUpdateSupport"]),
+        .testTarget(name: "AuxmoCoreTests", dependencies: ["AuxmoCore"]),
+        .testTarget(name: "AuxmoUpdateHelperTests", dependencies: ["AuxmoUpdateHelper"]),
+        .testTarget(name: "AuxmoUpdateSupportTests", dependencies: ["AuxmoUpdateSupport"]),
+        .testTarget(name: "AuxmoPanelTests", dependencies: ["Auxmo"])
     ],
     swiftLanguageModes: [.v5]
 )

@@ -6,7 +6,7 @@ cd "$(dirname "$0")/.."
 ROOT="${1:-dist}"
 [[ -d "$ROOT" ]] || exit 0
 ROOT="$(cd "$ROOT" && pwd -P)"
-LEGACY="$ROOT/Aural.app"
+LEGACY="$ROOT/Auxmo.app"
 [[ -e "$LEGACY" ]] || exit 0
 if [[ -L "$LEGACY" || ! -d "$LEGACY" ]]; then
     echo "旧构建路径不是普通应用目录，拒绝自动迁移：$LEGACY" >&2; exit 1
@@ -17,5 +17,5 @@ BUILD="$(/usr/libexec/PlistBuddy -c 'Print CFBundleVersion' "$LEGACY/Contents/In
 ARCHIVE="$ROOT/archive/local-builds"
 mkdir -p "$ARCHIVE"
 DESTINATION="$(mktemp -d "$ARCHIVE/legacy.XXXXXX")"
-mv "$LEGACY" "$DESTINATION/Aural.app"
-printf '旧本地构建 %s（%s）已归档：%s\n' "$VERSION" "$BUILD" "$DESTINATION/Aural.app"
+mv "$LEGACY" "$DESTINATION/Auxmo.app"
+printf '旧本地构建 %s（%s）已归档：%s\n' "$VERSION" "$BUILD" "$DESTINATION/Auxmo.app"
