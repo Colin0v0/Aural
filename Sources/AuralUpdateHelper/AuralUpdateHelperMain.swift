@@ -2,7 +2,7 @@ import Darwin
 import Foundation
 import AuralUpdateSupport
 
-/// 独立 helper 不依赖正在运行的 App；等待旧进程退出后按事务替换 bundle，再请求重新启动。
+/// 独立 helper 入口不依赖正在运行的 App；等待旧进程退出后按事务替换 bundle，再请求重新启动。
 @main
 enum AuralUpdateHelperMain {
     static func main() {
