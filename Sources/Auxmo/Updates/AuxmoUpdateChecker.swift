@@ -43,9 +43,16 @@ final class AuxmoUpdateChecker: ObservableObject {
     private let defaults: UserDefaults
     private let currentVersion: String
     private let checkInterval: TimeInterval = 6 * 60 * 60
+    /// 检查失败后等待一段时间再联网，避免一分钟定时器立即重复请求同一故障。
+    private let failureRetryInterval: TimeInterval = 30 * 60
     private let lastCheckKey = "com.colin0v0.auxmo.updates.lastCheck"
+    private let lastAttemptKey = "com.colin0v0.auxmo.updates.lastAttempt"
     private let skippedVersionKey = "com.colin0v0.auxmo.updates.skippedVersion"
     private var checkTask: Task<Void, Never>?
+    /// 用户开始下载或跳过后，旧检查结果不再有资格覆盖新的操作。
+    private var checkGeneration: UInt64 = 0
+    private let prepareStaging: (AuxmoAvailableUpdate) throws -> AuxmoUpdateInstaller.Paths
+    private let removeStaging: () throws -> Void
     /// 手动请求可升级正在进行的后台检查，不重复发出网络请求。
     private var currentCheckIsManual = false
     private let fetchUpdate: @MainActor () async throws -> AuxmoAvailableUpdate?
@@ -56,7 +63,11 @@ final class AuxmoUpdateChecker: ObservableObject {
 
     init(defaults: UserDefaults = .standard,
          currentVersion: String = AuxmoVersion.current,
-         fetchUpdate: @escaping @MainActor (String) async throws -> AuxmoAvailableUpdate? = AuxmoUpdateChecker.fetchAvailableUpdate) {
+         fetchUpdate: @escaping @MainActor (String) async throws -> AuxmoAvailableUpdate? = AuxmoUpdateChecker.fetchAvailableUpdate,
+         prepareStaging: @escaping (AuxmoAvailableUpdate) throws -> AuxmoUpdateInstaller.Paths = AuxmoUpdateInstaller.prepareStaging,
+         removeStaging: @escaping () throws -> Void = AuxmoUpdateInstaller.removeStaging) {
+        self.prepareStaging = prepareStaging
+        self.removeStaging = removeStaging
         self.defaults = defaults
         self.currentVersion = currentVersion
         self.fetchUpdate = { try await fetchUpdate(currentVersion) }
@@ -78,6 +89,20 @@ final class AuxmoUpdateChecker: ObservableObject {
         lastCheck <= 0 || lastCheck > now || now - lastCheck >= interval
     }
 
+    /// 成功检查按六小时限频；最近一次请求失败则改用更短的失败重试间隔。
+    nonisolated static func shouldStartAutomaticCheck(lastSuccess: TimeInterval,
+                                                      lastAttempt: TimeInterval,
+                                                      now: TimeInterval,
+                                                      successInterval: TimeInterval,
+                                                      failureInterval: TimeInterval) -> Bool {
+        let successful = lastSuccess > 0 && lastSuccess <= now ? lastSuccess : 0
+        let attempted = lastAttempt > 0 && lastAttempt <= now ? lastAttempt : 0
+        if attempted > successful {
+            return now - attempted >= failureInterval
+        }
+        return successful == 0 || now - successful >= successInterval
+    }
+
     func checkIfNeeded() {
         check(force: false)
     }
@@ -93,10 +118,16 @@ final class AuxmoUpdateChecker: ObservableObject {
             return
         }
         if !force {
-            let lastCheck = defaults.double(forKey: lastCheckKey)
+            let lastSuccess = defaults.double(forKey: lastCheckKey)
+            let lastAttempt = defaults.double(forKey: lastAttemptKey)
             let now = Date().timeIntervalSince1970
-            guard Self.isCheckDue(lastCheck: lastCheck, now: now, interval: checkInterval) else { return }
-            if lastCheck > now { defaults.removeObject(forKey: lastCheckKey) }
+            if lastSuccess > now { defaults.removeObject(forKey: lastCheckKey) }
+            if lastAttempt > now { defaults.removeObject(forKey: lastAttemptKey) }
+            guard Self.shouldStartAutomaticCheck(lastSuccess: lastSuccess,
+                                                 lastAttempt: lastAttempt,
+                                                 now: now,
+                                                 successInterval: checkInterval,
+                                                 failureInterval: failureRetryInterval) else { return }
         }
         // 下载失败必须保留原始错误，直到用户明确重试；后台检查不能重置它。
         switch phase {
@@ -108,7 +139,11 @@ final class AuxmoUpdateChecker: ObservableObject {
             break
         }
         isChecking = true
+        checkGeneration &+= 1
+        let generation = checkGeneration
         currentCheckIsManual = force
+        // 在真正联网前记录本次尝试；失败后由失败间隔限频，成功后再写成功时间。
+        defaults.set(Date().timeIntervalSince1970, forKey: lastAttemptKey)
         if case .failed = phase {} else { lastError = nil }
         if force { didCheckWithoutUpdate = false }
         checkTask = Task { [weak self] in
@@ -116,6 +151,8 @@ final class AuxmoUpdateChecker: ObservableObject {
             defer { isChecking = false; currentCheckIsManual = false }
             do {
                 let update = try await fetchUpdate()
+                // 异步返回时重新验证所有权；较新的用户操作优先。
+                guard generation == checkGeneration else { return }
                 let manual = currentCheckIsManual
                 defaults.set(Date().timeIntervalSince1970, forKey: lastCheckKey)
                 guard let update else {
@@ -141,6 +178,7 @@ final class AuxmoUpdateChecker: ObservableObject {
                 lastError = nil
                 didCheckWithoutUpdate = false
             } catch {
+                guard generation == checkGeneration else { return }
                 // 已有下载错误优先保留；后台检查失败不打扰用户。
                 if case .failed = phase {} else {
                     recordCheckFailure(error, manual: currentCheckIsManual)
@@ -165,9 +203,10 @@ final class AuxmoUpdateChecker: ObservableObject {
         case .idle, .available, .failed:
             break
         }
+        checkGeneration &+= 1
         lastError = nil
         do {
-            let paths = try AuxmoUpdateInstaller.prepareStaging(for: update)
+            let paths = try prepareStaging(update)
             phase = .downloading(progress: 0)
             startDownload(update: update, paths: paths)
         } catch {
@@ -179,8 +218,9 @@ final class AuxmoUpdateChecker: ObservableObject {
     func skipAvailableUpdate() {
         guard !isInspectingRecovery else { return }
         guard let update = availableUpdate else { return }
+        checkGeneration &+= 1
         cancelDownload()
-        do { try AuxmoUpdateInstaller.removeStaging() }
+        do { try removeStaging() }
         catch { recordUpdateFailure(error); return }
         defaults.set(update.version, forKey: skippedVersionKey)
         availableUpdate = nil
@@ -191,6 +231,11 @@ final class AuxmoUpdateChecker: ObservableObject {
     /// 设置窗口关闭后，下一次打开重新从默认入口开始。
     func resetSettingsPresentation() {
         didCheckWithoutUpdate = false
+        // 关闭窗口后，尚未完成的手动检查不能再把结果写回已关闭的设置页。
+        currentCheckIsManual = false
+        // 检查错误只属于当前设置页展示；下载、准备和安装错误仍须保留到用户明确处理。
+        if case .failed = phase { return }
+        lastError = nil
     }
 
 #if DEBUG

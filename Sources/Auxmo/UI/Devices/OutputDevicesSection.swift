@@ -4,9 +4,9 @@ import AuxmoCore
 /// 所有输出平铺显示，选择默认输出与修改各设备的硬件属性是互相独立的操作。
 struct OutputDevicesSection: View {
     let audio: SystemAudioSnapshot
-    let select: (UInt32) -> Void
-    let setVolume: (Float, UInt32) -> Void
-    let setMuted: (Bool, UInt32) -> Void
+    let select: (AudioOutput) -> Void
+    let setVolume: (Float, AudioOutput) -> Void
+    let setMuted: (Bool, AudioOutput) -> Void
     var simultaneousUIDs: Set<String> = []
     /// 多设备输出草稿已有成员时，真实设备行必须熄灯，由下方组合入口独占选中状态。
     var selectionSuppressed = false
@@ -22,8 +22,8 @@ struct OutputDevicesSection: View {
                                     selected: Self.isSelected(output: output, selectedID: audio.selectedID,
                                                               simultaneousUIDs: simultaneousUIDs,
                                                               selectionSuppressed: selectionSuppressed),
-                                    select: { select(output.id) }, setVolume: { setVolume($0, output.id) },
-                                    setMuted: { setMuted($0, output.id) },
+                                    select: { select(output) }, setVolume: { setVolume($0, output) },
+                                    setMuted: { setMuted($0, output) },
                                     selectionHint: simultaneousUIDs.isEmpty ? nil
                                         : L10n.format("结束多设备输出，仅使用“%@”播放",
                                                       language: language, arguments: [output.name]))
@@ -81,6 +81,7 @@ struct AudioDeviceRow<Device: AudioDeviceDescriptor>: View {
     }
 
     private func muteDescription(_ mute: AudioDeviceMute) -> String {
+        if let error = mute.error { return error }
         guard let muted = mute.muted else { return L10n.text("设备未公开静音状态", language: language) }
         return L10n.text(muted ? "已静音" : "未静音", language: language)
     }
@@ -121,8 +122,8 @@ struct AudioDeviceRow<Device: AudioDeviceDescriptor>: View {
                 })
                 .disabled(!mute.writable)
                 .accessibilityValue(muteDescription(mute))
-                .help(L10n.text(mute.writable ? "切换设备静音" : "设备未公开可写的硬件静音控制",
-                                language: language))
+                .help(mute.error ?? L10n.text(mute.writable ? "切换设备静音" : "设备未公开可写的硬件静音控制",
+                                              language: language))
                 if let scalar = volume.scalar {
                     PanelVolumeSlider(value: Binding(get: { Double(scalar) }, set: { setVolume(Float($0)) }),
                                       label: L10n.format(direction == .input ? "%@ 的输入音量" : "%@ 的设备音量",
@@ -133,9 +134,10 @@ struct AudioDeviceRow<Device: AudioDeviceDescriptor>: View {
                                         : "设备音量只读", language: language))
                     PanelPercentage(value: scalar, highlighted: hover.active)
                 } else {
-                    Text(L10n.text(direction == .input ? "不支持输入音量" : "不支持系统音量",
+                    Text(L10n.text(volume.error == nil ? (direction == .input ? "不支持输入音量" : "不支持系统音量") : "读取失败",
                                    language: language)).font(PanelStyle.captionFont)
                         .foregroundStyle(PanelStyle.secondary).frame(maxWidth: .infinity, alignment: .trailing)
+                        .help(volume.error ?? "")
                 }
             case .failed(let message):
                 Label(L10n.text("读取失败", language: language), systemImage: "exclamationmark.circle")

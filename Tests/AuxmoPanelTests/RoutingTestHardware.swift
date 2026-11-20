@@ -32,6 +32,7 @@ final class RoutingTestHardware {
     var muteWrites: [(Bool, AudioDeviceID)] = []
     var mutedIDs: Set<AudioDeviceID> = []
     var failMute = false
+    var failMuteIDs: Set<AudioDeviceID> = []
     var deferMute = false
     var pendingMutes: [AudioDeviceID: Bool] = [:]
     var beforeMute: ((AudioDeviceID) -> Void)?
@@ -108,7 +109,7 @@ final class RoutingTestHardware {
                 self.afterDestroy?(id)
             }, setMute: { muted, id in
                 self.beforeMute?(id)
-                if self.failMute { throw AudioFailure("注入：设备静音失败") }
+                if self.failMute || self.failMuteIDs.contains(id) { throw AudioFailure("注入：设备静音失败") }
                 self.muteWrites.append((muted, id))
                 if self.deferMute {
                     self.pendingMutes[id] = muted

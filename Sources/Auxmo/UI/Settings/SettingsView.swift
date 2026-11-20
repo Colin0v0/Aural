@@ -31,11 +31,10 @@ struct SettingsView: View {
             generalCard
             featuresCard
             diagnosticsCard
-            Spacer(minLength: 0)
             footer
         }
         .padding(SettingsMetrics.horizontalInset)
-        .frame(width: SettingsMetrics.width, height: SettingsMetrics.height, alignment: .topLeading)
+        .frame(width: SettingsMetrics.width, alignment: .topLeading)
         .background(PanelStyle.canvas)
         .foregroundStyle(PanelStyle.ink)
         .preferredColorScheme(settings.appearance?.colorScheme)
@@ -291,12 +290,23 @@ enum SettingsMetrics {
     // 分组标题、设置项与分隔线共用窗口留白，内层不再叠加缩进。
     static let horizontalInset: CGFloat = 18
     static let width: CGFloat = 500
-    // 新增诊断分组后按真实内容增高，避免固定窗口裁掉最后一行。
-    static let height: CGFloat = 660
     static let controlWidth: CGFloat = 238
     static let booleanControlWidth: CGFloat = 116
     static let rowHeight: CGFloat = 40
-    static var size: CGSize { CGSize(width: width, height: height) }
+
+    /// 设置页固定宽度，高度完全来自当前内容的首选尺寸。
+    static func contentSize(preferred: CGSize) -> CGSize {
+        CGSize(width: width, height: ceil(preferred.height))
+    }
+
+    /// 内容增减时保持窗口左上角，按标题栏以外的真实内容高度调整外框。
+    static func resizedWindowFrame(for window: NSWindow, contentSize: CGSize) -> CGRect {
+        let contentRect = CGRect(origin: .zero, size: contentSize)
+        var frame = window.frameRect(forContentRect: contentRect)
+        frame.origin.x = window.frame.minX
+        frame.origin.y = window.frame.maxY - frame.height
+        return frame
+    }
 }
 
 struct SettingsCard<Content: View>: View {

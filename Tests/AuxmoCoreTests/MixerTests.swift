@@ -235,6 +235,38 @@ struct SessionStateTests {
         ]))
     }
 
+    /// 连续观察先缺失、再出现冲突设备时，不能把未知元数据当作授权切换路由。
+    @Test func missingMetadataThenChangedOutputNeverRebindsSelectedRoute() {
+        let selected = AudioOutput(id: 21, uid: "headphones", name: "耳机",
+                                   transport: kAudioDeviceTransportTypeBluetooth)
+        let route = ApplicationPlaybackRoute.single(selected)
+        let observations = [
+            [ProcessOutputRoute(isRunningOutput: true, deviceUIDs: [])],
+            [ProcessOutputRoute(isRunningOutput: true, deviceUIDs: ["speakers"])],
+            [ProcessOutputRoute(isRunningOutput: true, deviceUIDs: [selected.uid])]
+        ]
+        #expect(route.acceptsActiveProcessRoutes(observations[0]))
+        #expect(!route.acceptsActiveProcessRoutes(observations[1]))
+        #expect(route.acceptsActiveProcessRoutes(observations[2]))
+        #expect(route.tapDeviceUID == selected.uid)
+        #expect(route.playbackDeviceUIDs == [selected.uid])
+    }
+
+    /// 多个活跃进程中，即便其中一个不报告设备，另一个明确冲突也必须拒绝。
+    @Test func missingMetadataDoesNotMaskAnotherActiveProcessConflict() {
+        let selected = AudioOutput(id: 21, uid: "headphones", name: "耳机",
+                                   transport: kAudioDeviceTransportTypeBluetooth)
+        let route = ApplicationPlaybackRoute.single(selected)
+        #expect(!route.acceptsActiveProcessRoutes([
+            ProcessOutputRoute(isRunningOutput: true, deviceUIDs: []),
+            ProcessOutputRoute(isRunningOutput: true, deviceUIDs: ["speakers"])
+        ]))
+        #expect(route.acceptsActiveProcessRoutes([
+            ProcessOutputRoute(isRunningOutput: true, deviceUIDs: []),
+            ProcessOutputRoute(isRunningOutput: false, deviceUIDs: ["speakers"])
+        ]))
+    }
+
     @Test func singleOutputOnlyAcceptsItsOwnProcessRoute() {
         let output = AudioOutput(id: 21, uid: "single.output", name: "单设备",
                                  transport: kAudioDeviceTransportTypeBuiltIn)

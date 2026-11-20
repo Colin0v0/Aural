@@ -50,8 +50,23 @@ struct SystemInputTests {
             if id == 11 { throw AudioFailure("测试麦克风断开") }
             return AudioDeviceVolume(scalar: 0.7, writable: true)
         }, readMute: { _ in AudioDeviceMute(muted: false, writable: true) })
-        #expect(controls[11] == .failed(message: "测试麦克风断开"))
+        #expect(controls[11] == .available(volume: AudioDeviceVolume(scalar: nil, writable: false, error: "测试麦克风断开"),
+                                         mute: AudioDeviceMute(muted: false, writable: true)))
         #expect(controls[22] == .available(volume: AudioDeviceVolume(scalar: 0.7, writable: true),
                                          mute: AudioDeviceMute(muted: false, writable: true)))
     }
+    @Test func disappearedNonDefaultInputIsSkippedButDefaultOrPresentFailureIsReported() throws {
+        func read(required: UInt32, present: [UInt32]) throws -> [AudioInput] {
+            try SystemInput.readInputs(deviceIDs: [11, 22], requiredDeviceID: required,
+                readStreams: { id in
+                    if id == 11 { throw AudioFailure("读取失败") }
+                    return [100]
+                }, readUID: { "mic-\($0)" }, readName: { "麦克风 \($0)" },
+                readTransport: { _ in 0 }, currentDeviceIDs: { present })
+        }
+        #expect(try read(required: 22, present: [22]).map(\.id) == [22])
+        #expect(throws: (any Error).self) { try read(required: 11, present: [22]) }
+        #expect(throws: (any Error).self) { try read(required: 22, present: [11, 22]) }
+    }
+
 }

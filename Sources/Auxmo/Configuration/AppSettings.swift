@@ -158,6 +158,8 @@ enum L10n {
 
     private static let english: [String: String] = [
         "全部静音": "Mute All",
+        "仅静音 Auxmo 已接管的应用。新播放应用可能短暂出声，不包含系统提示音。":
+            "Mutes apps managed by Auxmo only. Newly playing apps may be heard briefly; system sounds are not included.",
         "恢复各 App 原有静音状态": "Restore Each App's Mute State",
         "全局安全静音已开启": "Global safety mute is on",
         "全局安全静音已关闭": "Global safety mute is off",
@@ -206,6 +208,12 @@ enum L10n {
         "系统未在期限内释放残留组合，请重试释放": "macOS did not confirm removal of the remaining group before the deadline. Retry cleanup.",
         "系统输出已在 Auxmo 外改变；未自动抢回，请确认实际输出后重新选择": "Output changed outside Auxmo. It was not switched back; verify the actual output and select again.",
         "应用未在期限内跟随已确认输出，请重新应用": "The app did not follow the confirmed output before the deadline. Apply again.",
+        "请先手动退出 FineTune，避免重复处理音频。":
+            "Quit FineTune manually first to avoid processing the same audio twice.",
+        "FineTune 已退出，音量配置尚未应用。":
+            "FineTune quit before the volume configuration was applied.",
+        "系统输出已改变；点重新应用后才会在新设备上处理。":
+            "The system output changed. Reapply before processing on the new device.",
         "设置": "Settings",
         "Auxmo 设置": "Auxmo Settings",
         "通用": "General",
@@ -331,6 +339,9 @@ enum L10n {
         "播放音频后，可在这里单独调节音量": "Play audio to adjust each app’s volume here.",
         "音频状态不可用": "Audio status unavailable",
         "等待音频流": "Waiting for audio stream",
+        "音频流活跃": "Audio stream active",
+        "等待应用创建音频流": "Waiting for the app to create an audio stream",
+        "音频流空闲": "Audio stream idle",
         "应用捕获与输出的音频格式尚未一致，请重新应用":
             "The app capture and output formats have not matched yet. Reapply the configuration.",
         "应用播放增益，不影响麦克风输入": "App playback gain does not affect microphone input",
@@ -380,6 +391,7 @@ enum L10n {
         "电影": "Movie",
         "低音增强": "Bass Boost",
         "自定义": "Custom",
+        "已修改": "Modified",
         "另存为预设": "Save as Preset",
         "重置": "Reset",
         "重命名…": "Rename…",
@@ -544,7 +556,18 @@ enum L10n {
         "应用路由配置无法读取，请检查本地设置":
             "Could not read the app routing configuration. Check the local settings.",
         "应用路由配置无法保存，请检查本地设置":
-            "Could not save the app routing configuration. Check the local settings."
+            "Could not save the app routing configuration. Check the local settings.",
+        "当前没有可用的默认输出设备": "No default output device is currently available",
+        "所选输出设备已断开": "The selected output device disconnected",
+        "系统未确认输出切换，请刷新后检查":
+            "macOS did not confirm the output switch. Refresh and check again.",
+        "无法读回当前路由快照": "Could not read back the current routing snapshot",
+        "旧 APP 音频资源尚未释放，未切换输出":
+            "The previous app audio resources have not been released, so the output was not switched.",
+        "旧 APP 音频资源尚未暂停，未切换输出":
+            "The previous app audio resources have not been paused, so the output was not switched.",
+        "当前没有可用系统输出，请恢复后点重新应用。":
+            "No system output is currently available. Restore it and reapply."
     ]
 }
 

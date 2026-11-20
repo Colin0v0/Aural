@@ -31,22 +31,51 @@ public enum SystemInput {
 
     public static func snapshot() throws -> SystemInputSnapshot {
         let ids = try HAL.ids(HAL.system, HAL.address(kAudioHardwarePropertyDevices))
-        var inputs: [AudioInput] = []
-        for id in ids {
-            let streams = try HAL.ids(id, HAL.address(kAudioDevicePropertyStreams, scope: kAudioDevicePropertyScopeInput))
-            guard !streams.isEmpty else { continue }
-            let uid = try HAL.string(id, kAudioDevicePropertyDeviceUID)
-            guard !uid.hasPrefix("com.colin0v0.auxmo.tap.") else { continue }
-            inputs.append(AudioInput(id: id, uid: uid, name: try HAL.string(id, kAudioObjectPropertyName),
-                                     transport: try HAL.read(id, HAL.address(kAudioDevicePropertyTransportType), initial: UInt32(0))))
-        }
-        inputs.sort { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
         let selected: AudioDeviceID = try HAL.read(HAL.system, defaultDeviceAddress, initial: 0)
+        var inputs = try readInputs(deviceIDs: ids, requiredDeviceID: selected,
+                                    readStreams: { try HAL.ids($0, HAL.address(kAudioDevicePropertyStreams, scope: kAudioDevicePropertyScopeInput)) },
+                                    readUID: { try HAL.string($0, kAudioDevicePropertyDeviceUID) },
+                                    readName: { try HAL.string($0, kAudioObjectPropertyName) },
+                                    readTransport: { try HAL.read($0, HAL.address(kAudioDevicePropertyTransportType), initial: UInt32(0)) },
+                                    currentDeviceIDs: { try HAL.ids(HAL.system, HAL.address(kAudioHardwarePropertyDevices)) })
+        inputs.sort { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
         guard selected == 0 || inputs.contains(where: { $0.id == selected }) else {
             throw AudioFailure("当前默认输入设备不可用，请刷新后检查")
         }
         let controls = AudioDeviceControls.readControls(for: inputs.map(\.id), readVolume: volume, readMute: mute)
         return SystemInputSnapshot(inputs: inputs, selectedID: selected == 0 ? nil : selected, controls: controls)
+    }
+
+    /// 只跳过重新枚举确认消失的非默认设备；默认设备或仍在列表中的错误不能掩盖。
+    static func readInputs(deviceIDs: [AudioDeviceID], requiredDeviceID: AudioDeviceID,
+                           readStreams: (AudioDeviceID) throws -> [AudioObjectID],
+                           readUID: (AudioDeviceID) throws -> String,
+                           readName: (AudioDeviceID) throws -> String,
+                           readTransport: (AudioDeviceID) throws -> UInt32,
+                           currentDeviceIDs: () throws -> [AudioDeviceID]) throws -> [AudioInput] {
+        var inputs: [AudioInput] = []
+        for id in deviceIDs {
+            do {
+                guard try !readStreams(id).isEmpty else { continue }
+                let uid = try readUID(id)
+                guard !uid.hasPrefix("com.colin0v0.auxmo.tap.") else { continue }
+                inputs.append(AudioInput(id: id, uid: uid, name: try readName(id),
+                                         transport: try readTransport(id)))
+            } catch {
+                let stillPresent = try currentDeviceIDs().contains(id)
+                guard id != requiredDeviceID && !stillPresent else { throw error }
+            }
+        }
+        return inputs
+    }
+
+    /// 同时复查在线状态和设备 UID；检查与写入之间仍可能发生硬件变化，HAL 错误必须继续上报。
+    public static func validateIdentity(_ input: AudioInput) throws {
+        let alive: UInt32 = try HAL.read(input.id, HAL.address(kAudioDevicePropertyDeviceIsAlive), initial: 0)
+        let uid = try HAL.string(input.id, kAudioDevicePropertyDeviceUID)
+        guard alive != 0, uid == input.uid else {
+            throw AudioFailure("麦克风身份已变化或已断开，请刷新后重新操作")
+        }
     }
 
     public static func volume(of device: AudioDeviceID) throws -> AudioDeviceVolume {
@@ -65,9 +94,13 @@ public enum SystemInput {
         try AudioDeviceControls.setMute(muted, on: device, direction: .input)
     }
 
-    public static func select(_ device: AudioDeviceID) throws {
+    public static func select(_ input: AudioInput) throws {
+        let device = input.id
         let before = try snapshot()
-        guard before.inputs.contains(where: { $0.id == device }) else { throw AudioFailure("所选麦克风已断开") }
+        guard before.inputs.contains(where: { $0.id == device && $0.uid == input.uid }) else {
+            throw AudioFailure("所选麦克风已断开或身份已变化")
+        }
+        try validateIdentity(input)
         // 只写默认输入选择器，不能调用默认输出切换或终止应用音频会话。
         try HAL.write(HAL.system, defaultDeviceAddress, value: device)
         let actual: AudioDeviceID = try HAL.read(HAL.system, defaultDeviceAddress, initial: 0)

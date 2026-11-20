@@ -553,7 +553,7 @@ private extension DiagnosticDeviceControlState {
                       volumeWritable: volume.writable,
                       muted: mute.muted,
                       muteWritable: mute.writable,
-                      error: nil)
+                      error: volume.error ?? mute.error)
         case .failed(let message):
             self.init(state: "failed", volume: nil, volumeWritable: nil,
                       muted: nil, muteWritable: nil, error: message)

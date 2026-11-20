@@ -102,10 +102,12 @@ struct ApplicationMixerRow: View {
             }
             Text(app.label).lineLimit(1).help(app.bundleID)
                 .frame(width: applicationNameWidth, alignment: .leading)
-            PanelActionButton(systemName: effectiveMuted ? "speaker.slash.fill" : "speaker.wave.2",
+            // 应用静音、设备静音和顶栏全局静音共用描边图标与红色，避免同一种状态出现三种外观。
+            PanelActionButton(systemName: effectiveMuted ? "speaker.slash" : "speaker.wave.2",
                               title: effectiveMuted
                                   ? L10n.format("取消静音 %@", language: language, arguments: [app.label])
                                   : L10n.format("静音 %@", language: language, arguments: [app.label]),
+                              tint: effectiveMuted ? .red : nil,
                               hoverStyle: .foregroundOnly, action: toggleMute)
             .help(L10n.text(globallyMuted ? "全局安全静音已开启" : (state.muted ? "取消静音" : "静音"),
                             language: language))

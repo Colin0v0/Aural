@@ -33,9 +33,18 @@ struct OutputControlsTests {
             if id == 22 { throw AudioFailure("测试设备已断开") }
             return AudioDeviceVolume(scalar: 0.15, writable: true)
         }, readMute: { _ in AudioDeviceMute(muted: false, writable: true) })
-        #expect(controls[22] == .failed(message: "测试设备已断开"))
+        #expect(controls[22] == .available(volume: AudioDeviceVolume(scalar: nil, writable: false, error: "测试设备已断开"),
+                                          mute: AudioDeviceMute(muted: false, writable: true)))
         #expect(controls[11] == controls[33])
         #expect(controls.count == 3)
+    }
+
+    @Test func muteReadFailureDoesNotDisableTheIndependentVolume() {
+        let controls = SystemAudio.readControls(for: outputs, readVolume: { _ in
+            AudioDeviceVolume(scalar: 0.4, writable: true)
+        }, readMute: { _ in throw AudioFailure("静音读取失败") })
+        #expect(controls[11] == .available(volume: AudioDeviceVolume(scalar: 0.4, writable: true),
+                                          mute: AudioDeviceMute(muted: nil, writable: false, error: "静音读取失败")))
     }
 
     @Test func unavailableControlsRemainUnknownNotZeroOrFullVolume() {

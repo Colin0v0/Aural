@@ -17,6 +17,7 @@ final class ApplicationMeterController {
     deinit { timer?.invalidate() }
     var hasVisibleSurface: Bool { !visibleSurfaces.isEmpty }
     var visible: Bool { !visibleSurfaces.isDisjoint(with: selectedSections) }
+    var visibleSurfacesSnapshot: Set<MeterSurface> { visibleSurfaces }
 
     func source(for id: String) -> ApplicationLevelSource {
         if let existing = sources[id] { return existing }

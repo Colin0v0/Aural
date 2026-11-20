@@ -96,10 +96,18 @@ final class AppModel: ObservableObject {
     let outputHardware: MultiOutputHardware
     private let monitorsSystem: Bool
     private var timer: Timer?
-    /// 全局静音期间缩短新播放 App 的发现窗口；普通状态仍维持两秒低开销轮询。
-    private var safetyMuteRefreshTimer: Timer?
+    /// 静音下发与短周期发现的所有权独立于音频路由协调。
+    private let safetyMute = GlobalSafetyMuteController()
+    let deviceMuteConfirmations = DeviceMuteConfirmationController()
     private let metering = ApplicationMeterController()
     private var metersVisible: Bool { metering.visible }
+    /// 只有当前显示麦克风页的可见面板才需要枚举输入设备；隐藏页不因全局静音轮询反复读取 HAL。
+    private var inputControlsVisibleSurfaces: Set<MeterSurface> = []
+    private var shouldRefreshInputs: Bool {
+        InputRefreshPolicy.isNeeded(monitorsSystem: monitorsSystem,
+                                    selectedSurfaces: inputControlsVisibleSurfaces,
+                                    visibleSurfaces: metering.visibleSurfacesSnapshot)
+    }
     private var sleepObserver: NSObjectProtocol?
     private var wakeObserver: NSObjectProtocol?
     private var activationObserver: NSObjectProtocol?
@@ -330,7 +338,7 @@ final class AppModel: ObservableObject {
         guard !isShutdown, !isShuttingDown else { return }
         guard let applicationEnvironment else { return }
         refreshAudioCaptureAccess()
-        if monitorsSystem { refreshInputs() }
+        if shouldRefreshInputs { refreshInputs() }
         do {
             let retained = Set(mixStates.keys.filter { mixStates[$0]?.managed == true || sessions[$0] != nil })
             let observation = try applicationEnvironment.readApplications(retained)
@@ -785,7 +793,7 @@ final class AppModel: ObservableObject {
         }
         // 已确认路由是唯一可启动目标；未经确认的旧 UID 绝不能继续重放。
         if mode == .mixing, state.managed, state.boundOutputUID != output.uid {
-            guard state.failure != ApplicationMixFailure.outputChanged.message else {
+            guard state.failureReason != .outputChanged else {
                 mixStates[app.id] = state
                 stop(app.id)
                 return
@@ -907,6 +915,18 @@ final class AppModel: ObservableObject {
         updateMeteringActivity()
     }
 
+    /// 页面出现或切到麦克风页时显式读取一次；后台轮询仍同时受面板可见性约束。
+    func setInputControlsVisible(_ visible: Bool, for surface: MeterSurface) {
+        let wasNeeded = shouldRefreshInputs
+        if visible {
+            inputControlsVisibleSurfaces.insert(surface)
+        } else {
+            inputControlsVisibleSurfaces.remove(surface)
+        }
+        // 只在刚进入可见麦克风状态时读取一次，关闭页面或重复上报不额外扫描。
+        if shouldRefreshInputs, !wasNeeded { refreshInputs() }
+    }
+
     func setApplicationMetersSelected(_ selected: Bool, for surface: MeterSurface) {
         metering.setSelected(selected, surface: surface)
         updateMeteringActivity()
@@ -948,29 +968,67 @@ final class AppModel: ObservableObject {
         if changed { mixStates = nextMixStates }
     }
 
-    func selectInput(_ id: UInt32) {
+    /// 写入前确认用户看到的麦克风仍是同一个 UID 和句柄；不改用重连后出现的另一设备。
+    private func validateInputControlIdentity(_ expected: AudioInput) throws {
+        let current = try SystemInput.snapshot()
+        guard current.inputs.contains(where: { $0.id == expected.id && $0.uid == expected.uid }) else {
+            throw AudioFailure("麦克风身份已变化或已断开，请刷新后重新操作")
+        }
+        try SystemInput.validateIdentity(expected)
+    }
+
+    func selectInput(_ input: AudioInput) {
+        let id = input.id
+        guard inputAudio?.inputs.contains(where: { $0.id == id && $0.uid == input.uid }) == true else {
+            inputOperationError = "所选麦克风已断开，请刷新。"; return
+        }
         guard inputAudio?.selectedID != id else { return }
-        do { try SystemInput.select(id); inputOperationError = nil }
+        do { try validateInputControlIdentity(input); try SystemInput.select(input); inputOperationError = nil }
         catch { inputOperationError = error.localizedDescription }
         // 输入选择不调用 stopAll，不主动改变应用输出增益或默认输出。
         refresh()
     }
 
-    func setInputVolume(_ value: Float, on id: UInt32) {
-        guard inputAudio?.inputs.contains(where: { $0.id == id }) == true else {
+    func setInputVolume(_ value: Float, on input: AudioInput) {
+        let id = input.id
+        guard inputAudio?.inputs.contains(where: { $0.id == id && $0.uid == input.uid }) == true else {
             inputOperationError = "所选麦克风已断开，请刷新。"; return
         }
-        do { try SystemInput.setVolume(value, on: id); inputOperationError = nil }
+        do { try validateInputControlIdentity(input); try SystemInput.setVolume(value, on: id); inputOperationError = nil }
         catch { inputOperationError = error.localizedDescription }
         refreshInputs()
     }
 
-    func setInputMuted(_ muted: Bool, on id: UInt32) {
-        guard inputAudio?.inputs.contains(where: { $0.id == id }) == true else {
+    func setInputMuted(_ muted: Bool, on input: AudioInput) {
+        let id = input.id
+        guard inputAudio?.inputs.contains(where: { $0.id == id && $0.uid == input.uid }) == true else {
             inputOperationError = "所选麦克风已断开，请刷新。"; return
         }
-        do { try SystemInput.setMute(muted, on: id); inputOperationError = nil }
-        catch { inputOperationError = error.localizedDescription }
+        let key = DeviceMuteConfirmationController.Key(direction: .input, id: id)
+        deviceMuteConfirmations.cancel(key)
+        do {
+            try validateInputControlIdentity(input)
+            try SystemInput.setMute(muted, on: id)
+            inputOperationError = nil
+        } catch let pending as AudioDeviceMutePending where pending.deviceID == id && pending.muted == muted {
+            inputOperationError = nil
+            deviceMuteConfirmations.start(key: key, observe: {
+                let snapshot = try SystemInput.snapshot()
+                guard snapshot.inputs.contains(where: { $0.id == id && $0.uid == input.uid }) else {
+                    throw AudioFailure("麦克风身份已变化或已断开，请刷新后重新操作")
+                }
+                try SystemInput.validateIdentity(input)
+                guard case .available(_, let actual)? = snapshot.controls[id] else {
+                    throw AudioFailure("无法读取麦克风静音状态")
+                }
+                if let error = actual.error { throw AudioFailure(error) }
+                return actual.muted == muted
+            }, finish: { [weak self] error in
+                guard let self, !self.isShutdown, !self.isShuttingDown else { return }
+                if let error { self.inputOperationError = error }
+                self.refreshInputs()
+            })
+        } catch { inputOperationError = error.localizedDescription }
         refreshInputs()
     }
 
@@ -1011,58 +1069,31 @@ final class AppModel: ObservableObject {
         updateSafetyMuteRefreshTimer()
     }
 
-    /// 会话已存在时先切换其实际输出，避免等下一次轮询才生效。
+    /// 静音控制器只消费会话和意图；路由、会话生命周期和错误仍由模型持有。
     private func applyGlobalSafetyMuteToSessions() {
-        for (key, session) in sessions {
-            guard let state = mixStates[key] else { continue }
-            if session.mode == .mixing {
-                if globalSafetyMuteEnabled {
-                    session.setMuted(true)
-                    continue
-                }
-                // 关闭时只恢复仍会保留 mixing 的 App；其余会话由紧接着的重新协调
-                // 在保持来源静音的情况下释放，不能让原声在新会话建立前抢跑。
-                let keepsMixing = state.managed
-                    || effectiveApplicationAudioEffect(for: key) != nil
-                    || effectiveApplicationAudioRoute(for: key).isCustom
-                if keepsMixing { session.setMuted(state.muted) }
-                continue
-            }
-            if !globalSafetyMuteEnabled {
-                do { try session.setSafetyMute(false) }
-                catch { cleanupErrors[key] = "\(session.group.label)：\(error.localizedDescription)" }
-                continue
-            }
-            do {
-                // 只读计量没有重放端，直接切换 tap 来源静音，避免先释放再重建时漏声。
-                try session.setSafetyMute(true)
-            } catch { cleanupErrors[key] = "\(session.group.label)：\(error.localizedDescription)" }
-        }
+        safetyMute.apply(enabled: globalSafetyMuteEnabled, sessions: sessions, states: mixStates,
+                         keepsMixing: { [self] key, state in
+            state.managed || effectiveApplicationAudioEffect(for: key) != nil
+                || effectiveApplicationAudioRoute(for: key).isCustom
+        }, recordError: { [self] key, message in
+            cleanupErrors[key] = message
+        })
     }
 
-    /// 所有创建和更新 mixing 会话的入口共用一次状态下发，避免某条路径漏掉全局静音。
     private func applyPlaybackState(session: any ApplicationAudioSession,
                                     state: ApplicationMixState,
                                     effect: AppAudioEffectSettings?) throws {
-        try session.setGain(state.gain)
-        session.setMuted(state.effectiveMuted(globalSafetyMute: globalSafetyMuteEnabled))
-        session.setEffect(effect)
+        try safetyMute.applyPlaybackState(session: session, state: state, effect: effect,
+                                          enabled: globalSafetyMuteEnabled)
     }
 
-    /// 系统没有公开“任意 App 刚开始播放”的同步通知；安全静音期间用短周期只读轮询补齐。
+    /// 系统没有同步的新播放通知；短周期只读观察仍受模型生命周期与开关约束。
     private func updateSafetyMuteRefreshTimer() {
-        safetyMuteRefreshTimer?.invalidate()
-        safetyMuteRefreshTimer = nil
-        guard monitorsSystem, globalSafetyMuteEnabled, !isShuttingDown, !isShutdown else { return }
-        let timer = Timer(timeInterval: 0.25, repeats: true) { [weak self] _ in
-            Task { @MainActor in
-                guard let self, !self.isShutdown, !self.isShuttingDown,
-                      self.globalSafetyMuteEnabled else { return }
-                self.refreshApplicationState()
-            }
+        safetyMute.setRefreshActive(monitorsSystem && globalSafetyMuteEnabled && !isShuttingDown && !isShutdown) { [weak self] in
+            guard let self, !self.isShutdown, !self.isShuttingDown,
+                  self.globalSafetyMuteEnabled else { return }
+            self.refreshApplicationState()
         }
-        RunLoop.main.add(timer, forMode: .common)
-        safetyMuteRefreshTimer = timer
     }
 
     private func enableIfNeeded(_ state: inout ApplicationMixState) {
@@ -1181,7 +1212,7 @@ final class AppModel: ObservableObject {
     }
 
     private func markApplicationOutputChanged(for key: String) {
-        guard mixStates[key]?.failure != ApplicationMixFailure.outputChanged.message else { return }
+        guard mixStates[key]?.failureReason != .outputChanged else { return }
         diagnosticEventLog.record(category: "applicationFailure",
                                   message: "\(key): \(ApplicationMixFailure.outputChanged.message)")
         mixStates[key]?.markOutputChanged()
@@ -1320,7 +1351,8 @@ final class AppModel: ObservableObject {
         routeConfirmationTimer?.invalidate(); routeConfirmationTimer = nil
         lifecycle = .stopped; headphones.shutdown()
         timer?.invalidate(); timer = nil
-        safetyMuteRefreshTimer?.invalidate(); safetyMuteRefreshTimer = nil
+        safetyMute.stopRefresh()
+        deviceMuteConfirmations.cancelAll()
         metering.shutdown()
         removeOutputRouteListener()
         if let sleepObserver { NSWorkspace.shared.notificationCenter.removeObserver(sleepObserver) }

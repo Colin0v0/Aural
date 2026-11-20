@@ -105,6 +105,19 @@ struct AppSettingsTests {
         #expect(L10n.text("播客", language: .english) == "Podcast")
         #expect(L10n.text("我的预设", language: .english) == "My Presets")
         #expect(L10n.text("自定义", language: .english) == "Custom")
+        #expect(L10n.text("已修改", language: .english) == "Modified")
+        #expect(L10n.text("音频流活跃", language: .english) == "Audio stream active")
+        #expect(L10n.text("等待应用创建音频流", language: .english)
+                == "Waiting for the app to create an audio stream")
+        #expect(L10n.text("音频流空闲", language: .english) == "Audio stream idle")
+        #expect(L10n.text("请先手动退出 FineTune，避免重复处理音频。", language: .english)
+                == "Quit FineTune manually first to avoid processing the same audio twice.")
+        #expect(L10n.text("FineTune 已退出，音量配置尚未应用。", language: .english)
+                == "FineTune quit before the volume configuration was applied.")
+        #expect(L10n.text("系统输出已改变；点重新应用后才会在新设备上处理。", language: .english)
+                == "The system output changed. Reapply before processing on the new device.")
+        #expect(L10n.text("所选输出设备已断开", language: .english)
+                == "The selected output device disconnected")
         #expect(L10n.text("重命名", language: .english) == "Rename")
         #expect(L10n.text("删除", language: .english) == "Delete")
         #expect(L10n.text("另存为预设", language: .english) == "Save as Preset")
@@ -219,10 +232,24 @@ struct AppSettingsTests {
         #expect(settings.preampDB == -4)
     }
 
-    @Test func settingsWindowUsesTheDeclaredFixedSize() {
-        let size = SettingsMetrics.size
-        #expect(size.width == 500)
-        #expect(size.height == 660)
+    @Test func settingsWindowUsesContentDrivenHeight() throws {
+        let suite = "Auxmo.SettingsSizeTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defaults.removePersistentDomain(forName: suite)
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        let settings = AppSettings(defaults: defaults)
+        let model = AppModel(startsMonitoring: false)
+        let baseSize = preferredSettingsSize(settings: settings, model: model)
+        #expect(baseSize.width == 500)
+        #expect(baseSize.height > 0)
+
+        // 出现额外的读取错误行时，原生窗口高度必须随内容增长，而不是继续使用固定值。
+        defaults.set("invalid-language", forKey: "com.colin0v0.auxmo.settings.language")
+        let damaged = AppSettings(defaults: defaults)
+        let expandedSize = preferredSettingsSize(settings: damaged, model: model)
+        #expect(!damaged.readErrors.isEmpty)
+        #expect(expandedSize.height > baseSize.height)
     }
 
     @Test func repositoryLinkUsesTheInjectedRepositoryIdentity() throws {
@@ -294,7 +321,7 @@ struct AppSettingsTests {
         #expect(SettingsMetrics.booleanControlWidth == 116)
     }
 
-    @Test func settingsViewRendersAtFixedSizeInBothAppearances() throws {
+    @Test func settingsViewRendersAtContentSizeInBothAppearances() throws {
         let suite = "Auxmo.SettingsViewTests.\(UUID().uuidString)"
         let defaults = try #require(UserDefaults(suiteName: suite))
         defaults.removePersistentDomain(forName: suite)
@@ -306,22 +333,23 @@ struct AppSettingsTests {
         settings.menuBarBatterySource = .currentOutput
         for appearance in [AppAppearance.light, .dark] {
             settings.appearance = appearance
+            let size = preferredSettingsSize(settings: settings, model: model)
             let host = NSHostingView(rootView:
                 SettingsView(model: model, settings: settings)
                     .background(PanelStyle.canvas)
                     .preferredColorScheme(settings.appearance?.colorScheme)
             )
             host.appearance = appearance.nsAppearance
-            host.frame = NSRect(origin: .zero, size: SettingsMetrics.size)
+            host.frame = NSRect(origin: .zero, size: size)
             PanelTestSupport.flushLayout(host)
-            #expect(host.frame.size == SettingsMetrics.size)
+            #expect(host.frame.size == size)
 
             // NSViewRepresentable 的原生菜单按钮必须经真实 AppKit 宿主绘制；ImageRenderer 会显示禁止符号。
             let bitmap = try #require(host.bitmapImageRepForCachingDisplay(in: host.bounds))
             host.cacheDisplay(in: host.bounds, to: bitmap)
             let png = try #require(bitmap.representation(using: .png, properties: [:]))
             try png.write(to: URL(fileURLWithPath: "/tmp/auxmo-settings-\(appearance.rawValue).png"))
-            // 固定窗口新增诊断入口后，底部版本号仍必须可见，不能仅断言外框尺寸不变。
+            // 内容驱动高度下，底部版本号仍必须可见，不能被最后一个分组挤出窗口。
             let image = try #require(bitmap.cgImage)
             let request = VNRecognizeTextRequest()
             request.recognitionLevel = .accurate
@@ -330,5 +358,12 @@ struct AppSettingsTests {
             let rendered = (request.results ?? []).compactMap { $0.topCandidates(1).first?.string }.joined()
             #expect(rendered.contains(AuxmoVersion.current))
         }
+    }
+
+    /// 设置窗口高度由 SwiftUI 当前内容决定，不再由测试或控制器写入固定高度。
+    private func preferredSettingsSize(settings: AppSettings, model: AppModel) -> CGSize {
+        let host = NSHostingController(rootView: SettingsView(model: model, settings: settings))
+        host.sizingOptions = [.preferredContentSize]
+        return SettingsMetrics.contentSize(preferred: host.preferredContentSize)
     }
 }
