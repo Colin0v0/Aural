@@ -153,7 +153,7 @@ struct AudioPanel: View {
     }
 
     private var header: some View {
-        HStack(spacing: 7) {
+        HStack(spacing: PanelActionMetrics.spacing) {
             // 主面板与菜单栏、App 图标使用同一个品牌标记。
             AuxmoBrandMark(size: 18)
             Text("Auxmo").font(PanelStyle.titleFont)
@@ -169,16 +169,23 @@ struct AudioPanel: View {
 
     private var globalSafetyMuteButton: some View {
         let enabled = model.globalSafetyMuteEnabled
-        return trailingAction(PanelActionButton(
-            systemName: enabled ? "speaker.slash.fill" : "speaker.wave.2",
-            title: settings.localized(enabled ? "恢复各 App 原有静音状态" : "全部静音"),
-            tint: enabled ? PanelStyle.error : nil,
-            hoverStyle: .foregroundOnly
-        ) {
+        return Button {
             model.setGlobalSafetyMute(!enabled)
-        })
-        .frame(width: PanelActionMetrics.size, height: PanelActionMetrics.size)
+        } label: {
+            // 图标加短文案，避免 Safety Mute 只以一个红色符号出现在顶栏而难以发现。
+            HStack(spacing: 5) {
+                Image(systemName: enabled ? "speaker.slash.fill" : "speaker.wave.2")
+                    .font(.system(size: 12, weight: .medium))
+                Text(settings.localized(enabled ? "取消静音" : "全部静音"))
+                    .font(PanelStyle.bodyFont)
+                    .lineLimit(1)
+            }
+        }
+        .buttonStyle(PanelButtonStyle(foreground: enabled ? PanelStyle.error : PanelStyle.ink))
+        .fixedSize(horizontal: true, vertical: false)
+        .help(settings.localized(enabled ? "恢复各 App 原有静音状态" : "全部静音"))
         .disabled(!model.canChangeGlobalSafetyMute)
+        .accessibilityLabel(settings.localized(enabled ? "取消静音" : "全部静音"))
         .accessibilityValue(settings.localized(enabled ? "全局安全静音已开启" : "全局安全静音已关闭"))
     }
 

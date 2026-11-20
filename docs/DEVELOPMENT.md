@@ -28,7 +28,7 @@ A local signature check is not Apple notarization. See [distribution limits](TRU
 
 The normal reporting path is **Settings → Diagnostics → Export Diagnostics…**. It records current state and recent in-memory events. Review names, IDs, Bluetooth addresses, application identities, and protocol traces before sharing.
 
-**Settings → Diagnostics → Update remnants → Inspect and Clean…** checks for a stale mount record. Cleanup requires confirmation and a second complete image-inventory check. It removes only the stale record, never an attached image, installer payload, or recovery backup. Download, preparation, ready-to-install, and restart states block recovery cleanup.
+The low-level update staging checks remain covered by internal recovery tests and preserve the attached image, installer payload, and recovery backup. No manual Settings action is exposed.
 
 The app and update helper share `~/Library/Logs/Auxmo/update.log`, with one rotated `update.log.1`. Each file is limited to 1 MiB; the lock file is separate. Writers lock across processes, oversized entries keep their UTF-8 tail, and rotation errors are reported without selecting a different log path.
 
@@ -91,7 +91,7 @@ The preview test runs separately for each language. Ordinary test runs skip this
 - 历史设备记录只保留选择意图。判断旧路由仍有效时，必须在当前快照中确认 UID 与 ID；UID 消失时不使用旧 ID 选择设备或授权抢回默认输出。
 - 更新保留隔离属性。安装失败时尝试恢复原版本，分别报告安装失败、恢复成功或恢复失败；恢复失败保留 `old` 备份，后续暂存清理不能删除它。启动命令成功后的清理错误单独报告，不回滚已请求启动的新版本。
 - helper 的启动命令成功不等于新进程已健康启动。临时目录中的隔离属性测试也不等于真实下载、Gatekeeper 放行或公证验收。
-- 更新镜像卸载失败会保留 `extracted/.auxmo-mounted-image` 和挂载路径，后续下载、跳过更新及清理都停止。通过设置的“更新残留”入口检查，用户确认后再次读取完整镜像清单并核对同一标记，才允许删除失效标记；镜像仍连接、清单失败、备份存在或现场变化时拒绝清理。
+- 更新镜像卸载失败会保留 `extracted/.auxmo-mounted-image` 和挂载路径，后续下载、跳过更新及清理都停止。底层残留检查仍由内部恢复测试覆盖，并保留镜像、安装包与备份；设置页不提供手动入口。
 
 ## 中文要点
 
