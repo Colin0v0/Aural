@@ -16,6 +16,9 @@ struct AuxmoUpdateCheckerTests {
         checker.recordCheckFailure(error, manual: true)
         #expect(checker.lastError == "服务器返回 HTTP 503")
         #expect(!checker.didCheckWithoutUpdate)
+        // 关闭设置页只清除“检查更新”错误，不能让旧失败在下次打开时继续显示。
+        checker.resetSettingsPresentation()
+        #expect(checker.lastError == nil)
     }
 
     @MainActor
@@ -25,6 +28,110 @@ struct AuxmoUpdateCheckerTests {
         #expect(AuxmoUpdateChecker.isCheckDue(lastCheck: 1_000, now: 1_000 + interval, interval: interval))
         #expect(AuxmoUpdateChecker.isCheckDue(lastCheck: 1_000, now: 999, interval: interval))
         #expect(AuxmoUpdateChecker.isCheckDue(lastCheck: 0, now: 1_000, interval: interval))
+
+        let success: TimeInterval = 6 * 60 * 60
+        let failure: TimeInterval = 30 * 60
+        #expect(!AuxmoUpdateChecker.shouldStartAutomaticCheck(
+            lastSuccess: 1_000, lastAttempt: 2_000, now: 2_000 + failure - 1,
+            successInterval: success, failureInterval: failure
+        ))
+        #expect(AuxmoUpdateChecker.shouldStartAutomaticCheck(
+            lastSuccess: 1_000, lastAttempt: 2_000, now: 2_000 + failure,
+            successInterval: success, failureInterval: failure
+        ))
+        #expect(!AuxmoUpdateChecker.shouldStartAutomaticCheck(
+            lastSuccess: 3_000, lastAttempt: 2_000, now: 3_000 + success - 1,
+            successInterval: success, failureInterval: failure
+        ))
+    }
+
+    @MainActor
+    @Test func backgroundFailureWaitsBeforeAnotherAutomaticRequest() async throws {
+        let suite = "Auxmo.UpdateFailureRetry.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        var requests = 0
+        let checker = AuxmoUpdateChecker(defaults: defaults, fetchUpdate: { _ in
+            requests += 1
+            throw AuxmoUpdateError.httpFailure(503)
+        })
+
+        checker.check(force: false)
+        while checker.isChecking { await Task.yield() }
+        checker.check(force: false)
+        while checker.isChecking { await Task.yield() }
+        #expect(requests == 1)
+
+        // 手动检查不受失败间隔限制，用户明确点击仍然立即重试。
+        checker.check(force: true)
+        while checker.isChecking { await Task.yield() }
+        #expect(requests == 2)
+    }
+
+    @MainActor
+    @Test func closingSettingsWhileManualCheckIsRunningDoesNotRestoreStaleError() async throws {
+        let suite = "Auxmo.UpdateCloseWhileChecking.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        var continuation: CheckedContinuation<AuxmoAvailableUpdate?, Error>?
+        let checker = AuxmoUpdateChecker(defaults: defaults, fetchUpdate: { _ in
+            try await withCheckedThrowingContinuation { continuation = $0 }
+        })
+        checker.check(force: true)
+        while continuation == nil { await Task.yield() }
+        checker.resetSettingsPresentation()
+        continuation?.resume(throwing: AuxmoUpdateError.httpFailure(503))
+        while checker.isChecking { await Task.yield() }
+        #expect(checker.lastError == nil)
+        #expect(!checker.didCheckWithoutUpdate)
+    }
+
+    /// 旧请求最后返回时不能撤销用户的跳过，也不能重新显示已跳过的版本。
+    @MainActor
+    @Test func skippedUpdateIsNotRestoredByOlderCheck() async throws {
+        let suite = "Auxmo.UpdateSkipRace.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        var continuation: CheckedContinuation<AuxmoAvailableUpdate?, Error>?
+        let checker = AuxmoUpdateChecker(defaults: defaults, fetchUpdate: { _ in
+            try await withCheckedThrowingContinuation { continuation = $0 }
+        }, removeStaging: {})
+        checker.installPreviewUpdate(version: "0.4.2")
+        let update = try #require(checker.availableUpdate)
+        checker.check(force: false)
+        while continuation == nil { await Task.yield() }
+        checker.skipAvailableUpdate()
+        continuation?.resume(returning: update)
+        while checker.isChecking { await Task.yield() }
+        #expect(checker.availableUpdate == nil)
+        #expect(checker.phase == .idle)
+    }
+
+    /// 预备下载失败也属于更新操作；旧检查不能把真实失败改成无更新。
+    @MainActor
+    @Test func olderCheckCannotOverwriteDownloadFailure() async throws {
+        let suite = "Auxmo.UpdateDownloadRace.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        var continuation: CheckedContinuation<AuxmoAvailableUpdate?, Error>?
+        let checker = AuxmoUpdateChecker(defaults: defaults, fetchUpdate: { _ in
+            try await withCheckedThrowingContinuation { continuation = $0 }
+        }, prepareStaging: { _ in throw AuxmoUpdateError.invalidArchive })
+        checker.installPreviewUpdate(version: "0.4.2")
+        checker.check(force: false)
+        while continuation == nil { await Task.yield() }
+        checker.downloadAndPrepare()
+        let failedPhase = checker.phase
+        guard case .failed = failedPhase else {
+            continuation?.resume(returning: nil)
+            Issue.record("下载准备失败必须明确进入失败状态")
+            return
+        }
+        continuation?.resume(returning: nil)
+        while checker.isChecking { await Task.yield() }
+        #expect(checker.phase == failedPhase)
+        #expect(checker.availableUpdate?.version == "0.4.2")
+        #expect(checker.lastError != nil)
     }
 
     @MainActor

@@ -170,9 +170,12 @@ struct AuxmoUpdateBadgeSnapshotTests {
     @MainActor
     private func writeHostingSnapshot<V: View>(_ view: V, appearance: AppAppearance,
                                                path: String) throws {
-        let host = NSHostingView(rootView: view)
+        let controller = NSHostingController(rootView: view)
+        controller.sizingOptions = [.preferredContentSize]
+        let size = SettingsMetrics.contentSize(preferred: controller.preferredContentSize)
+        let host = controller.view
         host.appearance = appearance.nsAppearance
-        host.frame = NSRect(origin: .zero, size: SettingsMetrics.size)
+        host.frame = NSRect(origin: .zero, size: size)
         PanelTestSupport.flushLayout(host)
         let bitmap = try #require(host.bitmapImageRepForCachingDisplay(in: host.bounds))
         host.cacheDisplay(in: host.bounds, to: bitmap)

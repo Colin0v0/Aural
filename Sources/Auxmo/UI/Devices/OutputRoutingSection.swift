@@ -35,9 +35,9 @@ struct OutputRoutingSection: View {
     let routing: OutputRoutingState
     private var route: MultiOutputRoute? { routing.confirmed?.aggregate }
     private var error: String? { routing.error }
-    let select: (UInt32) -> Void
-    let setVolume: (Float, UInt32) -> Void
-    let setMuted: (Bool, UInt32) -> Void
+    let select: (AudioOutput) -> Void
+    let setVolume: (Float, AudioOutput) -> Void
+    let setMuted: (Bool, AudioOutput) -> Void
     let stop: () -> Void
     let dismissError: () -> Void
     var setSimultaneousVolume: (Float) -> Void = { _ in }
@@ -226,11 +226,11 @@ struct OutputRoutingSection: View {
     }
 
     /// 上方真实设备行的语义始终是“切换为单一输出”；点击时立即收起多输出草稿，避免两套选择状态并存。
-    private func selectDeviceFromPhysicalList(_ id: UInt32) {
+    private func selectDeviceFromPhysicalList(_ output: AudioOutput) {
         if selection.isChoosing {
             selection.cancel()
         }
-        select(id)
+        select(output)
     }
 }
 
@@ -240,8 +240,8 @@ struct SimultaneousOutputEditor: View {
     let controls: [UInt32: AudioDeviceControlState]
     let selectedUIDs: Set<String>
     let toggleMember: (String) -> Void
-    let setVolume: (Float, UInt32) -> Void
-    let setMuted: (Bool, UInt32) -> Void
+    let setVolume: (Float, AudioOutput) -> Void
+    let setMuted: (Bool, AudioOutput) -> Void
     @Environment(\.appLanguage) private var language
 
     var body: some View {
@@ -253,8 +253,8 @@ struct SimultaneousOutputEditor: View {
                     selected: selectedUIDs.contains(output.uid),
                     canDeselect: !(selectedUIDs.count == 1 && selectedUIDs.contains(output.uid)),
                     toggle: { toggleMember(output.uid) },
-                    setVolume: { setVolume($0, output.id) },
-                    setMuted: { setMuted($0, output.id) }
+                    setVolume: { setVolume($0, output) },
+                    setMuted: { setMuted($0, output) }
                 )
             }
         }
@@ -295,6 +295,7 @@ private struct SimultaneousOutputDeviceRow: View {
     @StateObject private var hover = PanelRowHoverState()
 
     private func muteDescription(_ mute: AudioDeviceMute) -> String {
+        if let error = mute.error { return error }
         guard let muted = mute.muted else { return L10n.text("设备未公开静音状态", language: language) }
         return L10n.text(muted ? "已静音" : "未静音", language: language)
     }
@@ -350,9 +351,9 @@ private struct SimultaneousOutputDeviceRow: View {
                 })
                 .disabled(!mute.writable)
                 .accessibilityValue(muteDescription(mute))
-                .help(mute.writable
+                .help(mute.error ?? (mute.writable
                       ? L10n.format("切换“%@”静音", language: language, arguments: [output.name])
-                      : L10n.text("设备未公开可写的硬件静音控制", language: language))
+                      : L10n.text("设备未公开可写的硬件静音控制", language: language)))
                 if let scalar = volume.scalar {
                     PanelVolumeSlider(value: Binding(get: { Double(scalar) }, set: { setVolume(Float($0)) }),
                                       label: L10n.format("%@ 的多设备输出音量", language: language,
@@ -365,7 +366,8 @@ private struct SimultaneousOutputDeviceRow: View {
                               : L10n.text("设备音量只读", language: language))
                     PanelPercentage(value: scalar)
                 } else {
-                    Text(L10n.text("不支持系统音量", language: language))
+                    Text(L10n.text(volume.error == nil ? "不支持系统音量" : "读取失败", language: language))
+                        .help(volume.error ?? "")
                         .font(PanelStyle.captionFont)
                         .foregroundStyle(PanelStyle.secondary)
                         .frame(maxWidth: .infinity, alignment: .trailing)

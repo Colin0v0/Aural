@@ -77,6 +77,7 @@ struct AudioPanel: View {
             model.setApplicationEffectsEnabled(settings.appAudioEffectsEnabled == true)
             layout.selectPage(currentPage)
             model.setApplicationMetersSelected(applicationMetersSelected, for: surface)
+            syncInputControlsVisibility()
         }
         .onChange(of: settings.showHeadphoneControls) { _, shown in
             if shown != true, selection.page == .headphones {
@@ -84,6 +85,10 @@ struct AudioPanel: View {
                 layout.selectPage(AudioPanelPage.output)
                 model.setApplicationMetersSelected(applicationMetersSelected, for: surface)
             }
+        }
+        .onChange(of: currentPage) { _, _ in
+            // 输入设备只在麦克风页可见时读取，避免全局静音的 4Hz 轮询在后台扫描 HAL。
+            syncInputControlsVisibility()
         }
         // 只提交确定的目标尺寸，AppKit 负责外框动画，SwiftUI 不产生第二套尺寸插值。
         .onChange(of: panelSize, initial: true) { _, size in
@@ -97,6 +102,10 @@ struct AudioPanel: View {
         currentPage.displaysApplications
     }
 
+    private func syncInputControlsVisibility() {
+        model.setInputControlsVisible(currentPage == .microphone, for: surface)
+    }
+
     private func applicationControls(direction: AudioDeviceDirection,
                                      metersVisible: Bool) -> some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -105,7 +114,7 @@ struct AudioPanel: View {
             case .output:
                 if let audio = model.audio {
                     OutputRoutingSection(audio: audio, routing: model.outputRouting,
-                                         select: model.selectOutput,
+                                         select: model.selectOutputDevice,
                                          setVolume: { model.setOutputVolume($0, on: $1) },
                                          setMuted: { model.setOutputMuted($0, on: $1) },
                                          stop: model.stopSimultaneousOutput,
@@ -169,24 +178,21 @@ struct AudioPanel: View {
 
     private var globalSafetyMuteButton: some View {
         let enabled = model.globalSafetyMuteEnabled
-        return Button {
+        return PanelActionButton(
+            // 顶栏沿用设备行与 App 行的描边静音图标，避免全局入口出现另一套填充字形。
+            systemName: enabled ? "speaker.slash" : "speaker.wave.2",
+            title: settings.localized(enabled ? "恢复各 App 原有静音状态" : "全部静音"),
+            // 静音状态统一使用系统红色；此前顶栏的深红与设备行并排时会明显不一致。
+            tint: enabled ? .red : nil,
+            hoverStyle: .foregroundOnly
+        ) {
             model.setGlobalSafetyMute(!enabled)
-        } label: {
-            // 图标加短文案，避免 Safety Mute 只以一个红色符号出现在顶栏而难以发现。
-            HStack(spacing: 5) {
-                Image(systemName: enabled ? "speaker.slash.fill" : "speaker.wave.2")
-                    .font(.system(size: 12, weight: .medium))
-                Text(settings.localized(enabled ? "取消静音" : "全部静音"))
-                    .font(PanelStyle.bodyFont)
-                    .lineLimit(1)
-            }
         }
-        .buttonStyle(PanelButtonStyle(foreground: enabled ? PanelStyle.error : PanelStyle.ink))
-        .fixedSize(horizontal: true, vertical: false)
-        .help(settings.localized(enabled ? "恢复各 App 原有静音状态" : "全部静音"))
+        .frame(width: PanelActionMetrics.size, height: PanelActionMetrics.size)
         .disabled(!model.canChangeGlobalSafetyMute)
-        .accessibilityLabel(settings.localized(enabled ? "取消静音" : "全部静音"))
         .accessibilityValue(settings.localized(enabled ? "全局安全静音已开启" : "全局安全静音已关闭"))
+        // 不改动图标或悬停样式；通过辅助功能说明这不是系统级零漏音保证。
+        .accessibilityHint(settings.localized("仅静音 Auxmo 已接管的应用。新播放应用可能短暂出声，不包含系统提示音。"))
     }
 
     @ViewBuilder private var updateBadge: some View {

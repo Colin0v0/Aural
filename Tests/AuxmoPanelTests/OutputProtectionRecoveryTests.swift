@@ -67,6 +67,66 @@ struct OutputProtectionRecoveryTests {
         #expect(f.hardware.muteWrites.allSatisfy { $0.0 })
     }
 
+    /// 旧 UI 快照仍在时，如果 HAL 复用句柄给另一设备，不能向新设备写入静音。
+    @Test func reusedOutputHandleCannotReceiveOldDevicesMuteAction() throws {
+        let f = try Fixture()
+        defer { f.close() }
+        let original = try #require(f.model.audio?.outputs.first { $0.id == 2 })
+        f.hardware.outputs.removeAll { $0.id == 2 }
+        f.hardware.outputs.append(AudioOutput(id: 2, uid: "replacement", name: "其他设备",
+                                              transport: kAudioDeviceTransportTypeUSB))
+        f.model.setOutputMuted(true, on: original)
+        #expect(f.hardware.muteWrites.isEmpty)
+        #expect(f.model.operationError != nil)
+    }
+
+    /// 用户静音已写入但设备稍后读回时，不能重复写入，也不能立即报错。
+    @Test func ordinaryDeviceMuteWaitsForSameDeviceReadback() async throws {
+        let f = try Fixture()
+        defer { f.close() }
+        let headphone = try #require(f.model.audio?.outputs.first { $0.id == 2 })
+        f.hardware.deferMute = true
+        f.model.setOutputMuted(true, on: headphone)
+        #expect(f.model.operationError == nil)
+        #expect(f.hardware.muteWrites.count == 1)
+        f.hardware.commitMute(on: 2)
+        try await Task.sleep(nanoseconds: 250_000_000)
+        #expect(f.hardware.muteWrites.count == 1)
+        #expect(f.model.operationError == nil)
+        guard case .available(_, let mute)? = f.model.audio?.controls[2] else {
+            Issue.record("设备读回应保持可用")
+            return
+        }
+        #expect(mute.muted == true)
+    }
+
+    /// 新设备继承旧数字句柄后，即使新快照已刷新，旧视图操作也不得改变新设备。
+    @Test func staleViewCannotMuteReplacementAfterSnapshotRefresh() throws {
+        let f = try Fixture()
+        defer { f.close() }
+        let original = try #require(f.model.audio?.outputs.first { $0.id == 2 })
+        f.hardware.outputs.removeAll { $0.id == 2 }
+        f.hardware.outputs.append(AudioOutput(id: 2, uid: "replacement", name: "其他设备",
+                                              transport: kAudioDeviceTransportTypeUSB))
+        f.model.refresh()
+        f.model.setOutputMuted(true, on: original)
+        #expect(f.hardware.muteWrites.isEmpty)
+        #expect(f.model.operationError != nil)
+    }
+
+    @Test func groupMuteReportsConfirmedAndFailedMembersWithoutUndoingSuccess() throws {
+        let f = try Fixture()
+        defer { f.close() }
+        #expect(f.model.startSimultaneousOutput(["headphone", "usb"]))
+        f.hardware.failMuteIDs.insert(3)
+        f.model.setSimultaneousOutputMuted(true)
+        #expect(f.hardware.mutedIDs.contains(2))
+        #expect(!f.hardware.mutedIDs.contains(3))
+        #expect(f.model.operationError?.contains("测试耳机") == true)
+        #expect(f.model.operationError?.contains("测试 USB") == true)
+        #expect(f.hardware.muteWrites.filter { $0.1 == 2 }.count == 1)
+    }
+
     @Test func offlineButStillEnumeratedHeadphoneCannotRestoreAnInvalidOldRoute() throws {
         let f = try Fixture(headphoneSelected: true)
         defer { f.close() }
@@ -209,7 +269,8 @@ struct OutputProtectionRecoveryTests {
         #expect(f.hardware.mutedIDs == [1, 3])
         #expect(f.hardware.muteWrites.map { $0.1 } == [1, 3])
         // 用户取消 USB 的设备静音后，同一等待状态的轮询不能再次擅自静音它。
-        f.model.setOutputMuted(false, on: 3)
+        let usb = try #require(f.model.audio?.outputs.first { $0.id == 3 })
+        f.model.setOutputMuted(false, on: usb)
         f.model.refresh()
         #expect(f.hardware.mutedIDs == [1])
         #expect(f.hardware.muteWrites.count == 3)

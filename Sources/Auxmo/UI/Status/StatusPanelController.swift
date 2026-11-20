@@ -3,6 +3,27 @@ import Combine
 import SwiftUI
 import AuxmoCore
 
+/// 设置内容高度变化时同步原生窗口，避免语言、错误提示或分组内容被固定高度裁切。
+@MainActor
+private final class SettingsHostingController: NSHostingController<SettingsView> {
+    var contentSizeDidChange: ((CGSize) -> Void)?
+    private var lastReportedSize = CGSize.zero
+
+    override func viewDidLayout() {
+        super.viewDidLayout()
+        reportContentSize()
+    }
+
+    func reportContentSize() {
+        let preferred = preferredContentSize
+        guard preferred.width > 0, preferred.height > 0 else { return }
+        let size = SettingsMetrics.contentSize(preferred: preferred)
+        guard size != lastReportedSize else { return }
+        lastReportedSize = size
+        contentSizeDidChange?(size)
+    }
+}
+
 /// 菜单栏浮层完全由自己持有：打开时确定一次锚点，之后只沿该锚点改变高度。
 @MainActor
 final class StatusPanelController: NSObject {
@@ -134,17 +155,24 @@ final class StatusPanelController: NSObject {
     private func showSettings() {
         hidePopup()
         if settingsWindow == nil {
-            let size = SettingsMetrics.size
+            let host = SettingsHostingController(rootView:
+                SettingsView(model: model, settings: AppSettings.shared))
+            host.sizingOptions = [.preferredContentSize]
+            let size = SettingsMetrics.contentSize(preferred: host.preferredContentSize)
             let window = SettingsWindow(contentRect: NSRect(origin: .zero, size: size),
                                   styleMask: [.titled, .closable, .miniaturizable], backing: .buffered, defer: false)
             window.delegate = self
             window.title = settingsWindowTitle
             window.isReleasedWhenClosed = false
-            let host = NSHostingController(rootView: SettingsView(model: model, settings: AppSettings.shared))
-            host.sizingOptions = []
-            host.view.setFrameSize(size)
             window.contentViewController = host
             window.setContentSize(size)
+            host.contentSizeDidChange = { [weak window] contentSize in
+                guard let window else { return }
+                window.setFrame(SettingsMetrics.resizedWindowFrame(for: window, contentSize: contentSize),
+                                display: true)
+            }
+            host.view.layoutSubtreeIfNeeded()
+            host.reportContentSize()
             window.center()
             settingsWindow = window
         }

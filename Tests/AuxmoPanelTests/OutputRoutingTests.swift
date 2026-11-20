@@ -99,7 +99,7 @@ struct OutputRoutingTests {
         let host = NSHostingView(rootView:
             SimultaneousOutputEditor(outputs: fixture.outputs, controls: fixture.controls,
                                      selectedUIDs: selected, toggleMember: { _ in },
-                                     setVolume: { _, _ in }, setMuted: { muteWrites.append(($0, $1)) })
+                                     setVolume: { _, _ in }, setMuted: { muteWrites.append(($0, $1.id)) })
                 .frame(width: PanelMetrics.contentWidth)
                 .background(PanelStyle.canvas)
         )

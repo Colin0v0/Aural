@@ -25,14 +25,22 @@ public struct AudioDeviceVolume: Equatable, Codable {
     /// nil 表示设备没有公开此音量属性，不能将它伪装成 50% 或 100%。
     public let scalar: Float?
     public let writable: Bool
-    public init(scalar: Float?, writable: Bool) { self.scalar = scalar; self.writable = writable }
+    /// 读取失败与设备未公开属性不同；失败时不能把未知读数当作真实音量。
+    public let error: String?
+    public init(scalar: Float?, writable: Bool, error: String? = nil) {
+        self.scalar = scalar; self.writable = writable; self.error = error
+    }
 }
 
 public struct AudioDeviceMute: Equatable, Codable {
     /// 不支持静音与“未静音”是两种状态，不用将音量写成零来冒充硬件静音。
     public let muted: Bool?
     public let writable: Bool
-    public init(muted: Bool?, writable: Bool) { self.muted = muted; self.writable = writable }
+    /// 静音读取失败时只禁用静音，不影响独立读取成功的音量。
+    public let error: String?
+    public init(muted: Bool?, writable: Bool, error: String? = nil) {
+        self.muted = muted; self.writable = writable; self.error = error
+    }
 }
 
 /// 写入已被 HAL 接受，但本次读回尚未匹配；这不是写入失败，调用方只能观察同一个设备确认。
@@ -67,8 +75,17 @@ public enum AudioDeviceControls {
                              readMute: (AudioDeviceID) throws -> AudioDeviceMute) -> [AudioDeviceID: AudioDeviceControlState] {
         var controls: [AudioDeviceID: AudioDeviceControlState] = [:]
         for id in ids {
-            do { controls[id] = .available(volume: try readVolume(id), mute: try readMute(id)) }
-            catch { controls[id] = .failed(message: error.localizedDescription) }
+            let volume: AudioDeviceVolume
+            let mute: AudioDeviceMute
+            do { volume = try readVolume(id) }
+            catch { volume = AudioDeviceVolume(scalar: nil, writable: false, error: error.localizedDescription) }
+            do { mute = try readMute(id) }
+            catch { mute = AudioDeviceMute(muted: nil, writable: false, error: error.localizedDescription) }
+            if let volumeError = volume.error, let muteError = mute.error {
+                controls[id] = .failed(message: "音量：\(volumeError)；静音：\(muteError)")
+            } else {
+                controls[id] = .available(volume: volume, mute: mute)
+            }
         }
         return controls
     }
