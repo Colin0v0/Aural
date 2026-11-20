@@ -116,7 +116,7 @@ Aural 在本机处理音频，不保存录音、不上传音频，无需账号�
 git clone https://github.com/Colin0v0/Aural.git
 cd Aural
 ./Scripts/check.sh
-open dist/Aural.app
+open dist/build/debug/Aural.app
 ```
 
 `check.sh` 会运行测试、构建应用、验证本地签名，并在宿主 Mac 上读取输出和输入设备诊断。无需真实音频硬件的发布检查由 [GitHub Actions](https://github.com/Colin0v0/Aural/actions/workflows/release.yml) 执行。绿色 CI 表示这些检查通过，不代表 Apple 认证或全部硬件验收完成。

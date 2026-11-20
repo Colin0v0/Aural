@@ -1,4 +1,5 @@
 import Foundation
+import AuralUpdateSupport
 import AuralCore
 
 /// 更新文件始终放在应用同卷的隐藏目录，helper 替换后才能继续在同一路径重启。
@@ -26,7 +27,7 @@ enum AuralUpdateInstaller {
         guard FileManager.default.isWritableFile(atPath: parent.path) else {
             throw AuralUpdateError.appDirectoryNotWritable(parent.path)
         }
-        removeStaging()
+        try removeStaging()
         let stage = stageURL
         let extracted = stage.appendingPathComponent("extracted", isDirectory: true)
         try FileManager.default.createDirectory(at: extracted, withIntermediateDirectories: true)
@@ -43,23 +44,27 @@ enum AuralUpdateInstaller {
                                                    paths: Paths) throws {
         let digest = try AuralSHA256.hexDigest(at: paths.archive)
         guard digest == update.sha256 else {
-            try? FileManager.default.removeItem(at: paths.archive)
+            do { try UpdateArchiveExtractor.removeIfPresent(paths.archive) }
+            catch {
+                throw UpdateArchiveError.cleanupFailed(operation: AuralUpdateError.checksumMismatch.localizedDescription,
+                    cleanup: error.localizedDescription, path: paths.archive.path)
+            }
             throw AuralUpdateError.checksumMismatch
         }
-        let appBundle: URL?
+        let appBundle: URL
+        let extractor = UpdateArchiveExtractor(run: runProcess)
         switch update.archiveKind {
         case .dmg:
-            appBundle = try extractAppFromDMG(paths.archive, to: paths.extracted)
+            appBundle = try extractor.extractDMG(paths.archive, to: paths.extracted)
         case .zip:
             // 仅为升级安装旧版保留；新建发布和自动更新默认使用 DMG。
-            appBundle = try extractAppFromZIP(paths.archive, to: paths.extracted)
+            appBundle = try extractor.extractZIP(paths.archive, to: paths.extracted)
         }
-        guard let appBundle else { throw AuralUpdateError.invalidArchive }
         try validateBundle(at: appBundle, expectedVersion: update.version)
-        try? FileManager.default.removeItem(at: paths.payload)
+        try UpdateArchiveExtractor.removeIfPresent(paths.payload)
         try FileManager.default.moveItem(at: appBundle, to: paths.payload)
-        try? FileManager.default.removeItem(at: paths.archive)
-        try? FileManager.default.removeItem(at: paths.extracted)
+        try UpdateArchiveExtractor.removeIfPresent(paths.archive)
+        try UpdateArchiveExtractor.removeIfPresent(paths.extracted)
     }
 
     static func validateReadyInstall(expectedVersion: String) throws {
@@ -87,29 +92,22 @@ enum AuralUpdateInstaller {
         try process.run()
     }
 
-    static func removeStaging() {
-        try? FileManager.default.removeItem(at: stageURL)
+    static func removeStaging() throws {
+        try removeStaging(at: stageURL)
     }
 
-    static func appendLog(_ message: String) {
-        let logs = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Library/Logs/Aural", isDirectory: true)
-        let logURL = logs.appendingPathComponent("update.log")
-        do {
-            try FileManager.default.createDirectory(at: logs, withIntermediateDirectories: true)
-            let data = Data(message.utf8)
-            if FileManager.default.fileExists(atPath: logURL.path) {
-                let handle = try FileHandle(forWritingTo: logURL)
-                try handle.seekToEnd()
-                try handle.write(contentsOf: data)
-                try handle.close()
-            } else {
-                try data.write(to: logURL, options: .atomic)
-            }
-        } catch {
-            // 日志失败不能影响更新主流程。
+    static func removeStaging(at stage: URL) throws {
+        try UpdateArchiveExtractor.requireUnmounted(stage.appendingPathComponent("extracted", isDirectory: true))
+        let backup = stage.appendingPathComponent("old", isDirectory: true)
+        guard !FileManager.default.fileExists(atPath: backup.path) else {
+            throw AuralUpdateError.recoveryBackupExists(backup.path)
+        }
+        if FileManager.default.fileExists(atPath: stage.path) {
+            try FileManager.default.removeItem(at: stage)
         }
     }
+
+    static func appendLog(_ message: String) { BoundedUpdateLog.record(message) }
 
     /// 在替换前验证 Bundle Identifier、版本、可执行文件和代码签名结构。
     static func validateBundle(at appURL: URL, expectedVersion: String) throws {
@@ -162,40 +160,6 @@ enum AuralUpdateInstaller {
         ]
         let data = try PropertyListSerialization.data(fromPropertyList: metadata, format: .xml, options: 0)
         try data.write(to: paths.stage.appendingPathComponent("metadata.plist"), options: .atomic)
-    }
-
-    /// DMG 是新的更新包格式；只读挂载后复制 Aural.app，避免执行镜像内的其他内容。
-    private static func extractAppFromDMG(_ archive: URL, to directory: URL) throws -> URL? {
-        try? FileManager.default.removeItem(at: directory)
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        let mount = directory.appendingPathComponent("mount", isDirectory: true)
-        try FileManager.default.createDirectory(at: mount, withIntermediateDirectories: true)
-        _ = try runProcess("/usr/bin/hdiutil",
-                           ["attach", archive.path, "-mountpoint", mount.path,
-                            "-nobrowse", "-noautoopen", "-readonly", "-quiet"])
-        defer { _ = try? runProcess("/usr/bin/hdiutil", ["detach", mount.path, "-quiet"]) }
-
-        let appBundles = try FileManager.default.contentsOfDirectory(at: mount,
-                                                                     includingPropertiesForKeys: nil)
-            .filter { $0.pathExtension.lowercased() == "app" }
-        guard appBundles.count == 1, let appBundle = appBundles.first else {
-            return nil
-        }
-        let destination = directory.appendingPathComponent(appBundle.lastPathComponent)
-        _ = try runProcess("/usr/bin/ditto", [appBundle.path, destination.path])
-        return destination
-    }
-
-    /// 只有旧版发布才会走到这里；解压仍然只接受唯一一个 .app。
-    private static func extractAppFromZIP(_ archive: URL, to directory: URL) throws -> URL? {
-        try? FileManager.default.removeItem(at: directory)
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        _ = try runProcess("/usr/bin/ditto", ["-x", "-k", archive.path, directory.path])
-        let appBundles = try FileManager.default.contentsOfDirectory(at: directory,
-                                                                     includingPropertiesForKeys: nil)
-            .filter { $0.pathExtension.lowercased() == "app" }
-        guard appBundles.count == 1 else { return nil }
-        return appBundles[0]
     }
 
     private static func runProcess(_ executable: String, _ arguments: [String]) throws -> String {

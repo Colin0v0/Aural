@@ -4,16 +4,17 @@ cd "$(dirname "$0")/.."
 
 # DMG 是主要安装包；ZIP 是旧版更新器的明确协议格式，不是新客户端的下载降级路径。
 ./Scripts/build-dmg.sh
-APP="dist/Aural.app"
+APP="${AURAL_BUILD_OUTPUT_ROOT:-dist/build}/${AURAL_BUILD_CONFIGURATION:-release}/Aural.app"
 VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP/Contents/Info.plist")"
 ARCH="$(uname -m)"
-DMG="dist/Aural-${VERSION}-macOS-${ARCH}.dmg"
-ZIP="dist/Aural-${VERSION}-macOS-${ARCH}.zip"
+OUTPUT_DIR="dist/releases/$VERSION/$ARCH"
+DMG="$OUTPUT_DIR/Aural-${VERSION}-macOS-${ARCH}.dmg"
+ZIP="$OUTPUT_DIR/Aural-${VERSION}-macOS-${ARCH}.zip"
 rm -f "$ZIP"
 /usr/bin/ditto -c -k --sequesterRsrc --keepParent "$APP" "$ZIP"
 # SHA-256 文件必须能直接放到用户下载目录执行，因此只记录资产文件名。
 (
-    cd dist
+    cd "$OUTPUT_DIR"
     shasum -a 256 "$(basename "$ZIP")" > "$(basename "$ZIP").sha256"
 )
 
@@ -21,11 +22,17 @@ rm -f "$ZIP"
 CHECK="$(mktemp -d "${TMPDIR:-/tmp}/aural-legacy-zip.XXXXXX")"
 DMG_MOUNT=""
 DMG_ATTACHED=0
+PRESERVE_CHECK=0
 cleanup() {
+    local status=$?
+    if [[ "$PRESERVE_CHECK" == "1" ]]; then echo "挂载未确认释放，已保留验证目录：$CHECK" >&2; return 1; fi
     if [[ "$DMG_ATTACHED" == "1" ]]; then
-        hdiutil detach "$DMG_MOUNT" -quiet || true
+        if ! hdiutil detach "$DMG_MOUNT" -quiet; then
+            echo "卸载失败，已保留验证目录：${CHECK}（挂载点：${DMG_MOUNT}）" >&2; return 1
+        fi
     fi
     rm -rf "$CHECK"
+    return "$status"
 }
 trap cleanup EXIT
 
@@ -55,7 +62,7 @@ cmp "$APP/Contents/Info.plist" "$CHECK/Aural.app/Contents/Info.plist"
 cmp "$APP/Contents/MacOS/Aural" "$CHECK/Aural.app/Contents/MacOS/Aural"
 verify_app "$CHECK/Aural.app"
 (
-    cd dist
+    cd "$OUTPUT_DIR"
     shasum -a 256 -c "$(basename "$ZIP").sha256"
 )
 
@@ -69,11 +76,11 @@ DMG_APP_COUNT="$(printf '%s\n' "$DMG_APPS" | sed '/^$/d' | wc -l | tr -d ' ')"
 test "$DMG_APP_COUNT" == "1"
 DMG_APP="$(printf '%s\n' "$DMG_APPS" | sed -n '1p')"
 verify_app "$DMG_APP"
-hdiutil detach "$DMG_MOUNT" -quiet
+if ! hdiutil detach "$DMG_MOUNT" -quiet; then PRESERVE_CHECK=1; exit 1; fi
 DMG_ATTACHED=0
 
 (
-    cd dist
+    cd "$OUTPUT_DIR"
     shasum -a 256 -c "$(basename "$DMG").sha256"
 )
 printf '发布资产已生成：DMG + 旧版更新 ZIP + 各自 SHA-256（%s）。\n' "$VERSION"

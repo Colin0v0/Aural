@@ -12,7 +12,7 @@ struct ApplicationMixerRow: View {
     let effectsAvailable: Bool
     let audioEffect: AppAudioEffectSettings
     let routingEnabled: Bool
-    let audioRoute: AppAudioRoute
+    let audioRoute: AppAudioRoute?
     let routePaused: Bool
     let routeOutputs: [AudioOutput]
     let toggleMute: () -> Void
@@ -38,7 +38,7 @@ struct ApplicationMixerRow: View {
          audioEffect: AppAudioEffectSettings = .disabled,
          updateAudioEffect: @escaping (AppAudioEffectSettings) -> Void = { _ in },
          openApplicationAudioEffects: @escaping () -> Void = {},
-         routingEnabled: Bool = false, audioRoute: AppAudioRoute = .allOutputs,
+         routingEnabled: Bool = false, audioRoute: AppAudioRoute? = .allOutputs,
          routePaused: Bool = false,
          routeOutputs: [AudioOutput] = [],
          setAudioRoute: @escaping (AppAudioRoute) -> Void = { _ in },
@@ -117,7 +117,7 @@ struct ApplicationMixerRow: View {
             if effectsAvailable {
                 effectButton
             }
-            if routingEnabled || audioRoute.isCustom {
+            if routingEnabled || audioRoute?.isCustom == true {
                 routingButton
             }
         }
@@ -132,7 +132,7 @@ struct ApplicationMixerRow: View {
     }
 
     private var trailingControlCount: Int {
-        (effectsAvailable ? 1 : 0) + ((routingEnabled || audioRoute.isCustom) ? 1 : 0)
+        (effectsAvailable ? 1 : 0) + ((routingEnabled || audioRoute?.isCustom == true) ? 1 : 0)
     }
 
     /// 两个入口同时出现时只压缩应用名与滑杆的弹性空间，不增加行高。
@@ -216,7 +216,7 @@ struct ApplicationMixerRow: View {
         var button = PanelActionButton(
             systemName: "arrow.triangle.branch",
             title: routingTitle,
-            tint: audioRoute.isCustom ? PanelStyle.accent : nil,
+            tint: audioRoute?.isCustom == true ? PanelStyle.accent : nil,
             hoverStyle: .foregroundOnly,
             menu: { routeMenu() }
         )
@@ -225,6 +225,7 @@ struct ApplicationMixerRow: View {
     }
 
     private var routingTitle: String {
+        guard let audioRoute else { return L10n.text("应用路由配置无法读取，请检查本地设置", language: language) }
         if routePaused { return L10n.text("所选输出不可用，已暂停播放", language: language) }
         guard audioRoute.isCustom else {
             return L10n.text("全部输出：自动包含新增设备", language: language)
@@ -243,6 +244,12 @@ struct ApplicationMixerRow: View {
     private func routeMenu() -> NSMenu {
         let menu = NSMenu()
         menu.autoenablesItems = false
+        guard let audioRoute else {
+            let unavailable = NSMenuItem(title: routingTitle, action: nil, keyEquivalent: "")
+            unavailable.isEnabled = false
+            menu.addItem(unavailable)
+            return menu
+        }
         let allOutputs = PanelActionMenuItem(title: L10n.text("全部输出（默认）", language: language)) {
             setAudioRoute(.allOutputs)
         }

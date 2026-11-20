@@ -300,7 +300,7 @@ final class StatusPanelController: NSObject {
         guard let button = statusItem.button else { return }
         let settings = AppSettings.shared
         let candidate = model.menuBarBattery(for: settings.menuBarBatterySource)
-        if settings.showMenuBarDeviceIcon,
+        if settings.showMenuBarDeviceIcon == true,
            let systemName = model.menuBarDeviceSymbol() {
             button.image = AuralStatusIcon.device(systemName: systemName)
         } else {

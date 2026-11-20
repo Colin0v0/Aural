@@ -20,7 +20,7 @@ struct BatterySourceMenu: NSViewRepresentable {
     }
 
     let title: String
-    let selected: MenuBarBatterySource
+    let selected: MenuBarBatterySource?
     let items: [Item]
     let onSelect: (MenuBarBatterySource) -> Void
 
@@ -46,7 +46,7 @@ final class BatterySourceMenuControl: NSButton {
     static let font = NSFont.systemFont(ofSize: 12)
 
     private var selectedTitle = ""
-    private(set) var selectedSource = MenuBarBatterySource.off
+    private(set) var selectedSource: MenuBarBatterySource?
     private var items: [BatterySourceMenu.Item] = []
     private var onSelect: (MenuBarBatterySource) -> Void = { _ in }
 
@@ -90,7 +90,7 @@ final class BatterySourceMenuControl: NSButton {
         NSEdgeInsets(top: 0, left: 0, bottom: 0, right: 0)
     }
 
-    func update(title: String, selected: MenuBarBatterySource,
+    func update(title: String, selected: MenuBarBatterySource?,
                 items: [BatterySourceMenu.Item],
                 onSelect: @escaping (MenuBarBatterySource) -> Void) {
         // 标题只用于绘制；勾选状态必须按真实 source 比较，不能依赖可能重名的菜单标题。

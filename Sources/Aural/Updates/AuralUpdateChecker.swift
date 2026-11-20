@@ -38,6 +38,7 @@ final class AuralUpdateChecker: ObservableObject {
     @Published private(set) var lastError: String?
     /// 只在用户主动检查并确认没有更新后显示，关闭设置窗口时清除。
     @Published private(set) var didCheckWithoutUpdate = false
+    @Published private(set) var isInspectingRecovery = false
 
     private let defaults: UserDefaults
     private let currentVersion: String
@@ -82,6 +83,7 @@ final class AuralUpdateChecker: ObservableObject {
     }
 
     func check(force: Bool) {
+        guard !isInspectingRecovery else { return }
         if isChecking {
             if force {
                 // 同一请求完成后按手动检查展示结果及错误。
@@ -155,6 +157,7 @@ final class AuralUpdateChecker: ObservableObject {
 
     /// 用户点击更新后下载 DMG，完成摘要校验和签名验证后才允许重启安装。
     func downloadAndPrepare() {
+        guard !isInspectingRecovery else { return }
         guard let update = availableUpdate else { return }
         switch phase {
         case .downloading, .preparing, .ready:
@@ -174,10 +177,12 @@ final class AuralUpdateChecker: ObservableObject {
 
     /// 跳过当前发现的版本，并删除已下载的暂存内容。
     func skipAvailableUpdate() {
+        guard !isInspectingRecovery else { return }
         guard let update = availableUpdate else { return }
-        defaults.set(update.version, forKey: skippedVersionKey)
         cancelDownload()
-        AuralUpdateInstaller.removeStaging()
+        do { try AuralUpdateInstaller.removeStaging() }
+        catch { recordUpdateFailure(error); return }
+        defaults.set(update.version, forKey: skippedVersionKey)
         availableUpdate = nil
         phase = .idle
         lastError = nil
@@ -239,6 +244,35 @@ final class AuralUpdateChecker: ObservableObject {
 
     func cancelPendingRestart() {
         pendingRestart = false
+    }
+
+    /// 人工恢复入口不取消下载、不卸载镜像、不删除备份。两次操作之间仍须重新验证现场。
+    func inspectUpdateStaging() async throws -> UpdateStagingInspection {
+        try requireRecoveryIdle()
+        isInspectingRecovery = true
+        defer { isInspectingRecovery = false }
+        return try await Task.detached(priority: .userInitiated) {
+            try UpdateStagingRecovery().inspect(AuralUpdateInstaller.stageURL)
+        }.value
+    }
+
+    func clearStaleMountRecord(_ inspection: UpdateStagingInspection) async throws {
+        try requireRecoveryIdle()
+        guard inspection.stage == AuralUpdateInstaller.stageURL else { throw UpdateRecoveryError.changedSinceInspection }
+        isInspectingRecovery = true
+        defer { isInspectingRecovery = false }
+        try await Task.detached(priority: .userInitiated) {
+            try UpdateStagingRecovery().removeStaleMarker(inspection)
+        }.value
+        AuralUpdateInstaller.appendLog("用户确认后已清理失效挂载标记；保留其余暂存文件\n")
+    }
+
+    private func requireRecoveryIdle() throws {
+        guard !isInspectingRecovery, !isChecking, !pendingRestart else { throw UpdateRecoveryError.busy }
+        switch phase {
+        case .downloading, .preparing, .ready: throw UpdateRecoveryError.busy
+        case .idle, .available, .failed: break
+        }
     }
 
     /// Releases Atom 源不占用 GitHub REST API 的匿名配额，也不依赖客户端内置密钥。
@@ -495,7 +529,7 @@ private final class AuralUpdateDownloadDelegate: NSObject, URLSessionDownloadDel
             return
         }
         do {
-            try? FileManager.default.removeItem(at: destination)
+            try UpdateArchiveExtractor.removeIfPresent(destination)
             try FileManager.default.createDirectory(at: destination.deletingLastPathComponent(),
                                                     withIntermediateDirectories: true)
             try FileManager.default.copyItem(at: location, to: destination)
@@ -560,6 +594,7 @@ enum AuralUpdateError: LocalizedError {
     case invalidSignature(String)
     case helperMissing(String)
     case readyInstallMissing
+    case recoveryBackupExists(String)
 
     var errorDescription: String? {
         switch self {
@@ -600,6 +635,8 @@ enum AuralUpdateError: LocalizedError {
             return "更新 helper 缺失：\(path)"
         case .readyInstallMissing:
             return "暂存更新已失效，请重新下载"
+        case .recoveryBackupExists(let path):
+            return "存在待恢复的旧版本备份，已停止清理：\(path)"
         }
     }
 }

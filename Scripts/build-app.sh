@@ -7,9 +7,25 @@ case "$CONFIGURATION" in
     debug|release) ;;
     *) echo "不支持的构建配置：$CONFIGURATION" >&2; exit 1 ;;
 esac
+./Scripts/archive-legacy-build.sh
+OUTPUT_DIR="${AURAL_BUILD_OUTPUT_ROOT:-dist/build}/$CONFIGURATION"
+./Scripts/assert-app-idle.sh "$OUTPUT_DIR/Aural.app"
 swift build --configuration "$CONFIGURATION"
 BIN_DIR="$(swift build --configuration "$CONFIGURATION" --show-bin-path)"
-APP="dist/Aural.app"
+mkdir -p "$OUTPUT_DIR"
+# 先在独立目录构建并验证完整包，不能往上次的包里增量拷贝而夹带旧文件。
+STAGING="$(mktemp -d "$OUTPUT_DIR/.aural-build.XXXXXX")"
+APP="$STAGING/Aural.app"
+cleanup() {
+    local status=$?
+    if [[ -e "$STAGING/previous.app" ]]; then
+        echo "构建替换未完成，已保留上次构建：$STAGING/previous.app" >&2
+        return 1
+    fi
+    rm -rf "$STAGING"
+    return "$status"
+}
+trap cleanup EXIT
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources/Licenses" "$APP/Contents/Helpers"
 cp "$BIN_DIR/Aural" "$APP/Contents/MacOS/Aural"
 cp "$BIN_DIR/AuralUpdateHelper" "$APP/Contents/Helpers/AuralUpdateHelper"
@@ -40,5 +56,13 @@ cp ThirdParty/BoseCtl/LICENSE "$APP/Contents/Resources/Licenses/BoseCtl-LICENSE.
 cp THIRD_PARTY_NOTICES.md "$APP/Contents/Resources/Licenses/THIRD_PARTY_NOTICES.md"
 codesign --force --sign - "$APP/Contents/Helpers/AuralUpdateHelper"
 codesign --force --sign - "$APP"
+codesign --verify --strict "$APP"
 /usr/libexec/PlistBuddy -c 'Print CFBundleIdentifier' "$APP/Contents/Info.plist"
+DESTINATION="$OUTPUT_DIR/Aural.app"
+# 编译期间用户可能打开了上次的包；替换前再次确认，不能移动运行中的 bundle。
+./Scripts/assert-app-idle.sh "$DESTINATION"
+if [[ -e "$DESTINATION" ]]; then mv "$DESTINATION" "$STAGING/previous.app"; fi
+mv "$APP" "$DESTINATION"
+rm -rf "$STAGING/previous.app"
+APP="$DESTINATION"
 printf '本地应用已生成：%s/%s\n' "$PWD" "$APP"

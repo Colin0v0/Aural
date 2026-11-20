@@ -16,7 +16,7 @@ struct AudioPanel: View {
     }
 
     private var pages: [AudioPanelPage] {
-        AudioPanelPage.available(showHeadphoneControls: settings.showHeadphoneControls)
+        AudioPanelPage.available(showHeadphoneControls: settings.showHeadphoneControls == true)
     }
 
     private var currentPage: AudioPanelPage {
@@ -70,16 +70,16 @@ struct AudioPanel: View {
         // 菜单栏浮层的底色由 NSPanel 原生图层绘制，页面保持透明；
         // 独立控制窗口仍由页面自己铺满背景。
         .background(surface == .popover ? Color.clear : PanelStyle.canvas)
-        .preferredColorScheme(settings.appearance.colorScheme)
+        .preferredColorScheme(settings.appearance?.colorScheme)
         .environment(\.appLanguage, settings.resolvedLanguage)
         .onAppear {
             // 模型独立于设置窗口生命周期；面板出现时同步一次总开关，避免直接读取窗口局部状态。
-            model.setApplicationEffectsEnabled(settings.appAudioEffectsEnabled)
+            model.setApplicationEffectsEnabled(settings.appAudioEffectsEnabled == true)
             layout.selectPage(currentPage)
             model.setApplicationMetersSelected(applicationMetersSelected, for: surface)
         }
         .onChange(of: settings.showHeadphoneControls) { _, shown in
-            if !shown, selection.page == .headphones {
+            if shown != true, selection.page == .headphones {
                 selection.page = .output
                 layout.selectPage(AudioPanelPage.output)
                 model.setApplicationMetersSelected(applicationMetersSelected, for: surface)
@@ -113,7 +113,7 @@ struct AudioPanel: View {
                                          setSimultaneousVolume: model.setSimultaneousOutputVolume,
                                          setSimultaneousMuted: model.setSimultaneousOutputMuted,
                                          toggleMember: model.toggleSimultaneousMember,
-                                         showSimultaneousOutput: settings.showSimultaneousOutput)
+                                         showSimultaneousOutput: settings.showSimultaneousOutput == true)
                 }
             case .input:
                 microphoneControls

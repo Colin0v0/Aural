@@ -1,7 +1,8 @@
 import Darwin
 import Foundation
+import AuralUpdateSupport
 
-/// 独立 helper 不依赖正在运行的 App；等待旧进程退出后原子替换 bundle，再重新启动。
+/// 独立 helper 不依赖正在运行的 App；等待旧进程退出后按事务替换 bundle，再请求重新启动。
 @main
 enum AuralUpdateHelperMain {
     static func main() {
@@ -16,7 +17,9 @@ enum AuralUpdateHelperMain {
             }
             exit(0)
         } catch {
-            appendLog("更新 helper 失败：\(error.localizedDescription)\n")
+            let message = "更新 helper 失败：\(error.localizedDescription)\n"
+            FileHandle.standardError.write(Data(message.utf8))
+            appendLog(message)
             exit(1)
         }
     }
@@ -42,30 +45,11 @@ enum AuralUpdateHelperMain {
         try waitForExit(pid: options.pid)
         try validatePayload(options: options)
 
-        let fileManager = FileManager.default
         let appURL = URL(fileURLWithPath: options.appPath)
         let stage = URL(fileURLWithPath: options.stagePath, isDirectory: true)
-        let payload = stage.appendingPathComponent("payload", isDirectory: true)
-        let old = stage.appendingPathComponent("old", isDirectory: true)
-
-        guard fileManager.fileExists(atPath: payload.path) else {
-            throw HelperError.missingPayload
-        }
-        try? fileManager.removeItem(at: old)
-        try fileManager.moveItem(at: appURL, to: old)
-        do {
-            try fileManager.moveItem(at: payload, to: appURL)
-            // 下载来源可能带入隔离标记；已校验签名的更新不应再次被隔离检查拦住。
-            _ = try? run("/usr/bin/xattr", ["-dr", "com.apple.quarantine", appURL.path])
-            let openResult = try run("/usr/bin/open", ["-n", "-g", appURL.path])
+        try UpdateInstallation().perform(app: appURL, stage: stage) { app in
+            let openResult = try run("/usr/bin/open", ["-n", "-g", app.path])
             appendLog("新版本启动命令已执行：\(openResult)\n")
-            try? fileManager.removeItem(at: old)
-            try? fileManager.removeItem(at: stage)
-        } catch {
-            // 替换后启动失败必须把旧版本放回原路径，不能留下不可启动的安装。
-            try? fileManager.removeItem(at: appURL)
-            try? fileManager.moveItem(at: old, to: appURL)
-            throw error
         }
     }
 
@@ -114,25 +98,7 @@ enum AuralUpdateHelperMain {
         return output
     }
 
-    private static func appendLog(_ message: String) {
-        let logs = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Library/Logs/Aural", isDirectory: true)
-        do {
-            try FileManager.default.createDirectory(at: logs, withIntermediateDirectories: true)
-            let logURL = logs.appendingPathComponent("update.log")
-            let data = Data(message.utf8)
-            if FileManager.default.fileExists(atPath: logURL.path) {
-                let handle = try FileHandle(forWritingTo: logURL)
-                try handle.seekToEnd()
-                try handle.write(contentsOf: data)
-                try handle.close()
-            } else {
-                try data.write(to: logURL, options: .atomic)
-            }
-        } catch {
-            // helper 日志失败不能阻断安装。
-        }
-    }
+    private static func appendLog(_ message: String) { BoundedUpdateLog.record(message) }
 }
 
 /// 重启参数不接受更新暂存目录，避免普通授权恢复误走安装流程。

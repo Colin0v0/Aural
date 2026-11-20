@@ -21,8 +21,13 @@ struct SettingsView: View {
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: 8) {
             header
+            if !settings.readErrors.isEmpty {
+                Text(settings.localized("设置读取失败，请重新选择"))
+                    .font(PanelStyle.captionFont).foregroundStyle(PanelStyle.secondary)
+                    .help(settings.readErrors.values.sorted().joined(separator: "\n"))
+            }
             generalCard
             featuresCard
             diagnosticsCard
@@ -33,7 +38,7 @@ struct SettingsView: View {
         .frame(width: SettingsMetrics.width, height: SettingsMetrics.height, alignment: .topLeading)
         .background(PanelStyle.canvas)
         .foregroundStyle(PanelStyle.ink)
-        .preferredColorScheme(settings.appearance.colorScheme)
+        .preferredColorScheme(settings.appearance?.colorScheme)
         // 设置页内的分段控件也读取环境语言；在这里统一注入，避免标题已翻译而“关闭 / 开启”仍显示中文。
         .environment(\.appLanguage, settings.resolvedLanguage)
         .onChange(of: scenePhase) { _, phase in
@@ -68,13 +73,13 @@ struct SettingsView: View {
     private var generalCard: some View {
         SettingsCard(title: settings.localized("通用")) {
             SettingsRow(title: settings.localized("界面语言")) {
-                PanelSegmentedControl(items: AppLanguage.allCases, selection: $settings.language,
+                PanelSegmentedControl(items: AppLanguage.allCases.map(Optional.some), selection: $settings.language,
                                       title: languageTitle)
                 .frame(width: SettingsMetrics.controlWidth)
             }
             PanelDivider()
             SettingsRow(title: settings.localized("外观")) {
-                PanelSegmentedControl(items: AppAppearance.allCases, selection: $settings.appearance,
+                PanelSegmentedControl(items: AppAppearance.allCases.map(Optional.some), selection: $settings.appearance,
                                       title: appearanceTitle)
                 .frame(width: SettingsMetrics.controlWidth)
             }
@@ -207,6 +212,36 @@ struct SettingsView: View {
             }
             .padding(.vertical, 8)
             .frame(minHeight: 52)
+            HStack {
+                Text(settings.localized("更新残留")).font(PanelStyle.bodyFont)
+                Spacer(minLength: 12)
+                Button(settings.localized("检查并清理…")) {
+                    Task { @MainActor in await inspectUpdateStaging() }
+                }
+                .buttonStyle(PanelButtonStyle())
+                .disabled(updates.isInspectingRecovery)
+            }
+            .padding(.vertical, 4)
+        }
+    }
+
+    @MainActor private func inspectUpdateStaging() async {
+        do {
+            let inspection = try await updates.inspectUpdateStaging()
+            guard inspection.canRemoveStaleMarker else {
+                presentDiagnosticError(settings.localized("更新残留"), settings.localized("没有需要清理的失效挂载标记"))
+                return
+            }
+            let alert = NSAlert()
+            alert.messageText = settings.localized("清理失效挂载标记？")
+            alert.informativeText = settings.localized("已确认相关镜像未连接。仅移除失效标记，不删除旧版本备份或安装包。") + "\n" + inspection.stage.path
+            alert.addButton(withTitle: settings.localized("清理"))
+            alert.addButton(withTitle: settings.localized("取消"))
+            guard alert.runModal() == .alertFirstButtonReturn else { return }
+            try await updates.clearStaleMountRecord(inspection)
+            presentDiagnosticError(settings.localized("更新残留"), settings.localized("失效挂载标记已清理，可重新下载更新"))
+        } catch {
+            presentDiagnosticError(settings.localized("无法清理更新残留"), error.localizedDescription)
         }
     }
 
@@ -232,10 +267,11 @@ struct SettingsView: View {
         alert.runModal()
     }
 
-    private var simultaneousOutputBinding: Binding<Bool> {
+    private var simultaneousOutputBinding: Binding<Bool?> {
         Binding(
             get: { settings.showSimultaneousOutput },
-            set: { enabled in
+            set: { value in
+                guard let enabled = value else { return }
                 if enabled {
                     settings.showSimultaneousOutput = true
                     return
@@ -250,10 +286,11 @@ struct SettingsView: View {
         )
     }
 
-    private var applicationEffectsBinding: Binding<Bool> {
+    private var applicationEffectsBinding: Binding<Bool?> {
         Binding(
             get: { settings.appAudioEffectsEnabled },
-            set: { enabled in
+            set: { value in
+                guard let enabled = value else { return }
                 // 设置持久化与运行时旁路同时更新，关闭后不会留下不可见的后台音效处理。
                 settings.appAudioEffectsEnabled = enabled
                 model.setApplicationEffectsEnabled(enabled)
@@ -261,7 +298,8 @@ struct SettingsView: View {
         )
     }
 
-    private func languageTitle(_ language: AppLanguage) -> String {
+    private func languageTitle(_ value: AppLanguage?) -> String {
+        guard let language = value else { return settings.localized("设置读取失败，请重新选择") }
         switch language {
         case .system: return settings.localized("跟随系统")
         case .chinese: return settings.localized("简体中文")
@@ -269,7 +307,8 @@ struct SettingsView: View {
         }
     }
 
-    private func appearanceTitle(_ appearance: AppAppearance) -> String {
+    private func appearanceTitle(_ value: AppAppearance?) -> String {
+        guard let appearance = value else { return settings.localized("设置读取失败，请重新选择") }
         switch appearance {
         case .system: return settings.localized("跟随系统")
         case .light: return settings.localized("浅色")
@@ -332,13 +371,19 @@ struct SettingsRow<Control: View>: View {
 struct SettingsToggleRow: View {
     let title: String
     let detail: String
-    @Binding var isOn: Bool
+    @Binding var isOn: Bool?
 
     init(title: String, detail: String, isOn: Binding<Bool>) {
         self.title = title
         self.detail = detail
-        _isOn = isOn
+        _isOn = Binding(get: { isOn.wrappedValue }, set: { if let value = $0 { isOn.wrappedValue = value } })
     }
+
+    init(title: String, detail: String, isOn: Binding<Bool?>) {
+        self.title = title; self.detail = detail; _isOn = isOn
+    }
+
+    @Environment(\.appLanguage) private var language
 
     var body: some View {
         HStack(alignment: .center, spacing: 16) {
@@ -350,7 +395,10 @@ struct SettingsToggleRow: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
             Spacer(minLength: 12)
-            PanelBooleanControl(isOn: $isOn)
+            // 不可读时两项都不选中，不能把未知开关绘制成用户已选择“关闭”。
+            PanelSegmentedControl(items: [Optional(false), Optional(true)], selection: $isOn) {
+                L10n.text($0 == true ? "开启" : "关闭", language: language)
+            }
                 .frame(width: SettingsMetrics.booleanControlWidth)
                 .accessibilityLabel(title)
         }
@@ -413,7 +461,8 @@ struct MenuBarBatterySettingsRow: View {
         return items
     }
 
-    private func title(for source: MenuBarBatterySource) -> String {
+    private func title(for value: MenuBarBatterySource?) -> String {
+        guard let source = value else { return settings.localized("设置读取失败，请重新选择") }
         switch source {
         case .off:
             return settings.localized("不显示")

@@ -74,8 +74,14 @@ public enum EffectiveAppAudioRoute: Equatable, Sendable {
     case allOutputs
     case custom(deviceUIDs: Set<String>)
     case waitingForDevices
+    case configurationUnavailable
 
-    public var isCustom: Bool { self != .allOutputs }
+    public var isCustom: Bool {
+        switch self {
+        case .custom, .waitingForDevices: return true
+        case .allOutputs, .configurationUnavailable: return false
+        }
+    }
     public var isWaitingForDevices: Bool { self == .waitingForDevices }
     public var customDeviceUIDs: Set<String> {
         guard case .custom(let uids) = self else { return [] }

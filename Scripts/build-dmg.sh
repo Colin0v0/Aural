@@ -4,6 +4,8 @@ cd "$(dirname "$0")/.."
 
 # 本地预览包默认使用 release 构建；仍可用 AURAL_BUILD_CONFIGURATION 显式指定 debug。
 CONFIGURATION="${AURAL_BUILD_CONFIGURATION:-release}"
+LAYOUT="${AURAL_DMG_LAYOUT:-finder}"
+case "$LAYOUT" in finder|plain) ;; *) echo "不支持的 DMG 布局：$LAYOUT" >&2; exit 1 ;; esac
 # PREVIEW_BUILD=1 只改最终包的显示版本，不改源码版本，避免本地预览冒充正式发布。
 PREVIEW_BUILD="${AURAL_PREVIEW_BUILD:-0}"
 ARCH="$(uname -m)"
@@ -14,7 +16,7 @@ esac
 
 AURAL_BUILD_CONFIGURATION="$CONFIGURATION" ./Scripts/build-app.sh
 
-APP="dist/Aural.app"
+APP="${AURAL_BUILD_OUTPUT_ROOT:-dist/build}/$CONFIGURATION/Aural.app"
 VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP/Contents/Info.plist")"
 BUILD_NUMBER="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$APP/Contents/Info.plist")"
 if [[ "$PREVIEW_BUILD" == "1" ]]; then
@@ -30,15 +32,27 @@ if [[ "$PREVIEW_BUILD" == "1" ]]; then
     codesign --force --sign - "$APP"
 fi
 
-OUTPUT="dist/Aural-${VERSION}-macOS-${ARCH}.dmg"
+OUTPUT_DIR="dist/releases/$VERSION/$ARCH"
+mkdir -p "$OUTPUT_DIR"
+OUTPUT="$OUTPUT_DIR/Aural-${VERSION}-macOS-${ARCH}.dmg"
 STAGING="$(mktemp -d "${TMPDIR:-/tmp}/aural-dmg.XXXXXX")"
 MOUNT_DIR=""
+PRESERVE_STAGING=0
 
 cleanup() {
+    local status=$?
+    if [[ "$PRESERVE_STAGING" == "1" ]]; then
+        echo "挂载未确认释放，已保留构建目录：${STAGING}（挂载点：${MOUNT_DIR}）" >&2
+        return 1
+    fi
     if [[ -n "$MOUNT_DIR" ]] && mount | grep -q "on ${MOUNT_DIR} "; then
-        hdiutil detach "$MOUNT_DIR" -quiet || true
+        if ! hdiutil detach "$MOUNT_DIR" -quiet; then
+            echo "卸载失败，已保留构建目录：${STAGING}（挂载点：${MOUNT_DIR}）" >&2
+            return 1
+        fi
     fi
     rm -rf "$STAGING"
+    return "$status"
 }
 trap cleanup EXIT
 
@@ -62,10 +76,11 @@ if [[ -z "$MOUNT_DIR" || ! -d "$MOUNT_DIR" ]]; then
     exit 1
 fi
 
-# 固定 Finder 图标位置和窗口大小；即使 AppleScript 无界面权限，也不阻断安装包生成。
+# 布局模式必须明确选择。Finder 布局失败就报告，不自动改成另一种产物。
 # open 后 Finder 异步登记新卷，脚本显式等待 disk 出现，消除固定 sleep 的竞态。
+if [[ "$LAYOUT" == "finder" ]]; then
 open "$MOUNT_DIR"
-if ! osascript - "$VOLUME_NAME" <<'APPLESCRIPT'
+osascript - "$VOLUME_NAME" <<'APPLESCRIPT'
 on run argv
     set volumeName to item 1 of argv
     tell application "Finder"
@@ -91,18 +106,16 @@ on run argv
     end tell
 end run
 APPLESCRIPT
-then
-    echo "Finder 布局设置未执行，保留可用 DMG。" >&2
 fi
 
 sync
-hdiutil detach "$MOUNT_DIR" -quiet
+if ! hdiutil detach "$MOUNT_DIR" -quiet; then PRESERVE_STAGING=1; exit 1; fi
 MOUNT_DIR=""
 hdiutil convert "$RW_DMG" -format UDZO -imagekey zlib-level=9 -o "$OUTPUT" -ov -quiet
 hdiutil verify "$OUTPUT" >/dev/null
 # 校验文件只写下载后的文件名；写成 dist/... 会让发布页命令在用户目录中找不到目标。
 (
-    cd dist
+    cd "$OUTPUT_DIR"
     shasum -a 256 "$(basename "$OUTPUT")" > "$(basename "$OUTPUT").sha256"
 )
 

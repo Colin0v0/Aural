@@ -196,6 +196,8 @@ struct DiagnosticApplicationState: Codable, Equatable {
     let mix: DiagnosticMixState?
     let route: DiagnosticApplicationRoute
     let storedEffect: AppAudioEffectSettings?
+    let effectConfigurationAvailable: Bool?
+    let effectPresetsAvailable: Bool?
     let session: DiagnosticApplicationSessionState?
 }
 
@@ -386,7 +388,7 @@ extension AppModel {
 
     private func diagnosticApplication(_ app: ApplicationAudioRow) -> DiagnosticApplicationState {
         let storageKey = applicationRouteStorageKeyForDiagnostics(app)
-        let storedRoute = storageKey.flatMap { appAudioRoutes[$0] }
+        let storedRoute = applicationRouteConfigurationAvailable ? storageKey.flatMap { appAudioRoutes[$0] } : nil
         let resolvedRoute = applicationAudioRoute(for: app.id)
         let effectiveRoute = effectiveApplicationAudioRoute(for: app.id)
         let session = sessions[app.id]
@@ -404,14 +406,16 @@ extension AppModel {
             },
             route: DiagnosticApplicationRoute(
                 storageKey: storageKey,
-                stored: storedRoute?.diagnosticDescription ?? "absent",
+                stored: applicationRouteConfigurationAvailable ? (storedRoute?.diagnosticDescription ?? "absent") : "configurationUnavailable",
                 storedDeviceUIDs: storedRoute?.customDeviceUIDs.sorted() ?? [],
-                resolved: resolvedRoute.diagnosticDescription,
-                resolvedDeviceUIDs: resolvedRoute.customDeviceUIDs.sorted(),
+                resolved: resolvedRoute?.diagnosticDescription ?? "configurationUnavailable",
+                resolvedDeviceUIDs: resolvedRoute?.customDeviceUIDs.sorted() ?? [],
                 effective: effectiveRoute.diagnosticDescription,
                 effectiveDeviceUIDs: effectiveRoute.customDeviceUIDs.sorted()
             ),
             storedEffect: storageKey.flatMap { appAudioEffects[$0] },
+            effectConfigurationAvailable: applicationEffectConfigurationAvailable,
+            effectPresetsAvailable: applicationEffectPresetsAvailable,
             session: session.map {
                 DiagnosticApplicationSessionState(
                     resources: ($0 as? ProcessAudioSession)?.resourceSnapshot,
@@ -503,6 +507,7 @@ private extension EffectiveAppAudioRoute {
         case .allOutputs: return "allOutputs"
         case .custom: return "custom"
         case .waitingForDevices: return "waitingForDevices"
+        case .configurationUnavailable: return "configurationUnavailable"
         }
     }
 }
