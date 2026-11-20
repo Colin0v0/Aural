@@ -10,9 +10,12 @@ let package = Package(
     ],
     targets: [
         .target(name: "AuralCore"),
-        .executableTarget(name: "Aural", dependencies: ["AuralCore"], resources: [.process("Resources")]),
-        .executableTarget(name: "AuralUpdateHelper"),
+        .target(name: "AuralUpdateSupport"),
+        .executableTarget(name: "Aural", dependencies: ["AuralCore", "AuralUpdateSupport"], resources: [.process("Resources")]),
+        .executableTarget(name: "AuralUpdateHelper", dependencies: ["AuralUpdateSupport"]),
         .testTarget(name: "AuralCoreTests", dependencies: ["AuralCore"]),
+        .testTarget(name: "AuralUpdateHelperTests", dependencies: ["AuralUpdateHelper"]),
+        .testTarget(name: "AuralUpdateSupportTests", dependencies: ["AuralUpdateSupport"]),
         .testTarget(name: "AuralPanelTests", dependencies: ["Aural"])
     ],
     swiftLanguageModes: [.v5]

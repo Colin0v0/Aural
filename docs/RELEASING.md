@@ -17,6 +17,8 @@ Do not disable Gatekeeper or SIP to satisfy an installation test. Check [distrib
 - [ ] Review privacy claims, known limitations, [headphone evidence](HEADPHONE_COMPATIBILITY.md), and third-party notices.
 - [ ] Record which exact physical devices and scenarios were tested. Do not turn unrun checklist items into pass claims.
 
+Local apps are separated into `dist/build/debug/Aural.app` and `dist/build/release/Aural.app`. Release assets are under `dist/releases/<version>/<arch>/`; filenames and checksum contents remain unchanged. Use `AURAL_PREVIEW_BUILD=1` for local packaging tests that must not overwrite a versioned release asset. Finder layout is the default and must succeed; noninteractive CI explicitly sets `AURAL_DMG_LAYOUT=plain` and runs the same package verification.
+
 ## Hardware acceptance
 
 Use low device volumes and non-sensitive audio. These are per-setup checks, not a statement that every model has passed:

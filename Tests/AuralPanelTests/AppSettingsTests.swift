@@ -1,6 +1,7 @@
 import AppKit
 import SwiftUI
 import Testing
+import Vision
 import AuralCore
 @testable import Aural
 
@@ -15,11 +16,11 @@ struct AppSettingsTests {
 
         let settings = AppSettings(defaults: defaults)
 
-        #expect(!settings.showHeadphoneControls)
-        #expect(!settings.showSimultaneousOutput)
-        #expect(!settings.appAudioEffectsEnabled)
+        #expect(settings.showHeadphoneControls == false)
+        #expect(settings.showSimultaneousOutput == false)
+        #expect(settings.appAudioEffectsEnabled == false)
         #expect(settings.menuBarBatterySource == .off)
-        #expect(!settings.showMenuBarDeviceIcon)
+        #expect(settings.showMenuBarDeviceIcon == false)
     }
 
     @Test func settingsPersistAcrossInstances() throws {
@@ -40,11 +41,11 @@ struct AppSettingsTests {
         let restored = AppSettings(defaults: defaults)
         #expect(restored.language == .english)
         #expect(restored.appearance == .dark)
-        #expect(!restored.showHeadphoneControls)
-        #expect(!restored.showSimultaneousOutput)
-        #expect(restored.appAudioEffectsEnabled)
+        #expect(restored.showHeadphoneControls == false)
+        #expect(restored.showSimultaneousOutput == false)
+        #expect(restored.appAudioEffectsEnabled == true)
         #expect(restored.menuBarBatterySource == .pinned(deviceUID: "Bluetooth:AA-BB-CC-DD-EE-01"))
-        #expect(restored.showMenuBarDeviceIcon)
+        #expect(restored.showMenuBarDeviceIcon == true)
     }
 
     @Test(arguments: ["zh-Hans", "zh-Hant", "en-US", "ja-JP"])
@@ -306,7 +307,7 @@ struct AppSettingsTests {
             let host = NSHostingView(rootView:
                 SettingsView(model: model, settings: settings)
                     .background(PanelStyle.canvas)
-                    .preferredColorScheme(settings.appearance.colorScheme)
+                    .preferredColorScheme(settings.appearance?.colorScheme)
             )
             host.appearance = appearance.nsAppearance
             host.frame = NSRect(origin: .zero, size: SettingsMetrics.size)
@@ -318,6 +319,14 @@ struct AppSettingsTests {
             host.cacheDisplay(in: host.bounds, to: bitmap)
             let png = try #require(bitmap.representation(using: .png, properties: [:]))
             try png.write(to: URL(fileURLWithPath: "/tmp/aural-settings-\(appearance.rawValue).png"))
+            // 固定窗口新增诊断入口后，底部版本号仍必须可见，不能仅断言外框尺寸不变。
+            let image = try #require(bitmap.cgImage)
+            let request = VNRecognizeTextRequest()
+            request.recognitionLevel = .accurate
+            request.recognitionLanguages = ["en-US"]
+            try VNImageRequestHandler(cgImage: image).perform([request])
+            let rendered = (request.results ?? []).compactMap { $0.topCandidates(1).first?.string }.joined()
+            #expect(rendered.contains(AuralVersion.current))
         }
     }
 }

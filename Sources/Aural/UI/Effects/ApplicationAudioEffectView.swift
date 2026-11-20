@@ -44,10 +44,11 @@ struct ApplicationAudioEffectView: View {
     var body: some View {
         GeometryReader { geometry in
             let hasNotice = !model.applicationEffectsEnabled
-            let hasError = model.operationError != nil
+            let hasError = model.appAudioEffectPersistenceError != nil
             VStack(alignment: .leading, spacing: EqualizerLayoutMetrics.spacing) {
                 header
                     .frame(height: EqualizerLayoutMetrics.headerHeight, alignment: .leading)
+                    .disabled(!model.applicationEffectConfigurationAvailable)
                 pageTabs
                     .frame(height: EqualizerLayoutMetrics.pageTabHeight, alignment: .leading)
                 if hasNotice {
@@ -63,6 +64,7 @@ struct ApplicationAudioEffectView: View {
                     )
                     presetToolbar
                         .frame(height: EqualizerLayoutMetrics.toolbarHeight, alignment: .leading)
+                        .disabled(!model.applicationEffectConfigurationAvailable)
                     EqualizerResponsePreview(
                         eq: draft.settings.eq,
                         enabled: draft.settings.enabled,
@@ -74,6 +76,7 @@ struct ApplicationAudioEffectView: View {
                                        onPreview: previewGain,
                                        onCommit: commitGain)
                         .frame(height: heights.fader)
+                        .disabled(!model.applicationEffectConfigurationAvailable)
                 } else if presentation.page == .spatial {
                     SpatialEffectPage(
                         appName: appName,
@@ -84,15 +87,29 @@ struct ApplicationAudioEffectView: View {
                         onModeChange: commitSpatialMode
                     )
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .disabled(!model.applicationEffectConfigurationAvailable)
                 } else if presentation.page == .dynamics {
-                    dynamicsPage
+                    dynamicsPage.disabled(!model.applicationEffectConfigurationAvailable)
                 } else {
-                    channelPage
+                    channelPage.disabled(!model.applicationEffectConfigurationAvailable)
                 }
-                if let error = model.operationError {
-                    PanelError(text: L10n.text(error, language: language))
+                if let error = model.appAudioEffectPersistenceError {
+                    HStack {
+                        PanelError(text: L10n.text(error, language: language))
                         .lineLimit(2)
                         .help(L10n.text(error, language: language))
+                        Spacer(minLength: 8)
+                        if !model.applicationEffectPresetsAvailable {
+                            Button(L10n.text("重新读取预设", language: language)) { model.reloadApplicationAudioEffectPresets() }
+                                .buttonStyle(PanelButtonStyle())
+                        }
+                        if !model.applicationEffectConfigurationAvailable {
+                            Button(L10n.text("重新读取音效配置", language: language)) {
+                                model.reloadApplicationAudioEffects()
+                                if model.applicationEffectConfigurationAvailable { draft.settings = model.applicationAudioEffect(for: applicationID) }
+                            }.buttonStyle(PanelButtonStyle())
+                        }
+                    }
                         .frame(height: EqualizerLayoutMetrics.errorHeight, alignment: .leading)
                 }
             }
@@ -104,7 +121,7 @@ struct ApplicationAudioEffectView: View {
         .background(PanelStyle.canvas)
         .foregroundStyle(PanelStyle.ink)
         .tint(PanelStyle.accent)
-        .preferredColorScheme(appSettings.appearance.colorScheme)
+        .preferredColorScheme(appSettings.appearance?.colorScheme)
         .environment(\.appLanguage, language)
         .alert(L10n.text("另存为预设", language: language),
                isPresented: $presentation.showingSavePreset) {
@@ -133,6 +150,9 @@ struct ApplicationAudioEffectView: View {
         .onDisappear {
             // A/B 仅用于当前试听，关闭窗口后必须恢复正式设置。
             model.setApplicationAudioEffectBypassed(false, for: applicationID)
+        }
+        .onChange(of: model.appAudioEffects) { _, _ in
+            if model.applicationEffectConfigurationAvailable { draft.settings = model.applicationAudioEffect(for: applicationID) }
         }
     }
 
@@ -306,7 +326,7 @@ struct ApplicationAudioEffectView: View {
                         }
                     }
                 }
-                if !model.appAudioEffectCustomPresets.isEmpty {
+                if model.applicationEffectPresetsAvailable, !model.appAudioEffectCustomPresets.isEmpty {
                     Section(L10n.text("我的预设", language: language)) {
                         ForEach(model.appAudioEffectCustomPresets) { preset in
                             Button(preset.name) {
@@ -337,6 +357,7 @@ struct ApplicationAudioEffectView: View {
                 presentation.showingSavePreset = true
             }
             .buttonStyle(PanelButtonStyle())
+            .disabled(!model.applicationEffectPresetsAvailable)
 
             // 只有当前选中的是我的预设时，才允许直接更名或删除这个预设；不在底部再放管理入口。
             if let selectedCustomPreset {

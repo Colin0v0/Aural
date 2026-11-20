@@ -378,7 +378,9 @@ public final class OutputRoutingController {
                     let reportedIDs = try hardware.activePlaybackDeviceIDs()
                     let activeIDs = reportedIDs.filter { knownIDs.contains($0) }
                     // 失效句柄和残留的进程报告不能证明旧路由仍在播放，也不能授权抢回旧输出。
-                    let confirmedAvailable = try snapshot.outputs.contains(where: { $0.id == confirmed.output.id })
+                    let confirmedAvailable = try snapshot.outputs.contains(where: {
+                        $0.id == confirmed.output.id && $0.uid == confirmed.output.uid
+                    })
                         && hardware.isAlive(confirmed.output.id)
                     let localPlayback = confirmedAvailable && (localPlaybackOnConfirmedRoute?() == true)
                     let userSelecting = isUserSelectingOutput?() == true
@@ -763,9 +765,10 @@ public final class OutputRoutingController {
     private func confirmedDeviceIDs(_ confirmed: ConfirmedOutputRoute,
                                     in snapshot: SystemAudioSnapshot) -> Set<AudioDeviceID> {
         guard let aggregate = confirmed.aggregate else {
-            return [snapshot.outputs.first { $0.uid == confirmed.output.uid }?.id ?? confirmed.output.id]
+            guard let current = snapshot.outputs.first(where: { $0.uid == confirmed.output.uid }) else { return [] }
+            return [current.id]
         }
-        var result: Set<AudioDeviceID> = [aggregate.deviceID]
+        var result: Set<AudioDeviceID> = []
         if let current = snapshot.outputs.first(where: { $0.uid == aggregate.uid }) {
             result.insert(current.id)
         }
@@ -781,24 +784,20 @@ public final class OutputRoutingController {
     /// 已确认路由和控制目标都必须换到新句柄，不能把同一台耳机误判成外部切换。
     private func refreshConfirmedHandles(in snapshot: SystemAudioSnapshot) {
         guard let confirmed = state.confirmed else { return }
-        let output = snapshot.outputs.first { $0.uid == confirmed.output.uid } ?? confirmed.output
+        // 查不到 UID 时只保留历史意图供离线保护使用，不把旧 ID 当作当前设备的身份凭据。
+        guard let output = snapshot.outputs.first(where: { $0.uid == confirmed.output.uid }) else { return }
         var aggregate = confirmed.aggregate
         if let route = aggregate {
-            let aggregateOutput = snapshot.outputs.first { $0.uid == route.uid }
-            let members = route.outputs.map { member in
-                snapshot.outputs.first { $0.uid == member.uid } ?? member
+            guard let aggregateOutput = snapshot.outputs.first(where: { $0.uid == route.uid }) else { return }
+            let members = route.outputs.compactMap { member in
+                snapshot.outputs.first { $0.uid == member.uid }
             }
-            if let aggregateOutput {
-                aggregate = MultiOutputRoute(deviceID: aggregateOutput.id, uid: route.uid,
-                                             outputs: members, mainOutputUID: route.mainOutputUID,
-                                             previousOutputUID: route.previousOutputUID,
-                                             sampleRate: route.sampleRate)
-            } else if members != route.outputs {
-                aggregate = MultiOutputRoute(deviceID: route.deviceID, uid: route.uid,
-                                             outputs: members, mainOutputUID: route.mainOutputUID,
-                                             previousOutputUID: route.previousOutputUID,
-                                             sampleRate: route.sampleRate)
-            }
+            // 不用残留句柄补齐缺失成员，也不缩减保存的组；成员离线由正常组协调流程处理。
+            guard members.count == route.outputs.count else { return }
+            aggregate = MultiOutputRoute(deviceID: aggregateOutput.id, uid: route.uid,
+                                         outputs: members, mainOutputUID: route.mainOutputUID,
+                                         previousOutputUID: route.previousOutputUID,
+                                         sampleRate: route.sampleRate)
         }
         if output != confirmed.output || aggregate != confirmed.aggregate {
             state.confirmed = ConfirmedOutputRoute(intent: confirmed.intent, output: output, aggregate: aggregate)

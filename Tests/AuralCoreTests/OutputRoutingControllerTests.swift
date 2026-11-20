@@ -5,6 +5,39 @@ import Testing
 
 @MainActor
 struct OutputRoutingControllerTests {
+    @Test func recycledHeadphoneIDCannotAuthorizeSelectingAnUnrelatedNewDevice() {
+        let fixture = RoutingTestHardware()
+        fixture.selected = 2; fixture.systemSelected = 2
+        let controller = OutputRoutingController(hardware: fixture.hardware)
+        let now = Date(timeIntervalSince1970: 1000)
+        controller.observe(fixture.snapshot, at: now)
+        fixture.outputs.removeAll { $0.uid == "headphone" }
+        fixture.outputs.append(AudioOutput(id: 2, uid: "other-speaker", name: "另一台音箱", transport: kAudioDeviceTransportTypeUSB))
+        fixture.selected = 1; fixture.systemSelected = 1
+        fixture.activePlayback = [2]
+        controller.localPlaybackOnConfirmedRoute = { true }
+        controller.observe(fixture.snapshot, at: now.addingTimeInterval(1))
+        #expect(fixture.selections.isEmpty)
+        #expect(fixture.selected == 1 && controller.state.confirmed?.output.uid == "speaker")
+    }
+
+    @Test func recycledAggregateIDCannotAuthorizeRestoringAnUnrelatedOutput() {
+        let fixture = RoutingTestHardware()
+        let controller = OutputRoutingController(hardware: fixture.hardware)
+        let now = Date(timeIntervalSince1970: 1000)
+        controller.request(.simultaneous(["speaker", "headphone"]), at: now)
+        let oldID = fixture.selected
+        fixture.compositions.removeAll()
+        fixture.outputs.append(AudioOutput(id: oldID, uid: "other-device", name: "复用句柄的设备", transport: kAudioDeviceTransportTypeUSB))
+        fixture.selected = 1; fixture.systemSelected = 1
+        fixture.activePlayback = [oldID]
+        fixture.selections.removeAll()
+        controller.localPlaybackOnConfirmedRoute = { true }
+        controller.observe(fixture.snapshot, at: now.addingTimeInterval(1))
+        #expect(!fixture.selections.contains(oldID))
+        #expect(!fixture.destroyed.contains(oldID))
+        #expect(controller.state.confirmed?.output.uid == "speaker")
+    }
     private let start = Date(timeIntervalSince1970: 1_000)
 
     @Test func transientObservationErrorWaitsAndRecoversWithoutSelectingAnotherDevice() {

@@ -1,4 +1,5 @@
 import AppKit
+import CoreFoundation
 import Combine
 import SwiftUI
 import AuralCore
@@ -62,55 +63,71 @@ final class AppSettings: ObservableObject {
 
     private let defaults: UserDefaults
 
-    @Published var language: AppLanguage {
-        didSet { defaults.set(language.rawValue, forKey: Key.language) }
+    /// nil 明确表示记录不可读，不冒充用户已选择默认值；只有用户再次选择才覆盖该键。
+    @Published private(set) var readErrors: [String: String] = [:]
+    @Published var language: AppLanguage? { didSet { persist(language?.rawValue, key: Key.language) } }
+    @Published var appearance: AppAppearance? {
+        didSet { persist(appearance?.rawValue, key: Key.appearance); applyApplicationAppearance() }
     }
-    @Published var appearance: AppAppearance {
-        didSet {
-            defaults.set(appearance.rawValue, forKey: Key.appearance)
-            applyApplicationAppearance()
-        }
-    }
-    @Published var showHeadphoneControls: Bool {
-        didSet { defaults.set(showHeadphoneControls, forKey: Key.headphones) }
-    }
-    @Published var showSimultaneousOutput: Bool {
-        didSet { defaults.set(showSimultaneousOutput, forKey: Key.simultaneousOutput) }
-    }
-    @Published var appAudioEffectsEnabled: Bool {
-        didSet { defaults.set(appAudioEffectsEnabled, forKey: Key.appAudioEffects) }
-    }
-    @Published var menuBarBatterySource: MenuBarBatterySource {
-        didSet { defaults.set(menuBarBatterySource.storageValue, forKey: Key.menuBarBatterySource) }
-    }
-    @Published var showMenuBarDeviceIcon: Bool {
-        didSet { defaults.set(showMenuBarDeviceIcon, forKey: Key.menuBarDeviceIcon) }
-    }
+    @Published var showHeadphoneControls: Bool? { didSet { persist(showHeadphoneControls, key: Key.headphones) } }
+    @Published var showSimultaneousOutput: Bool? { didSet { persist(showSimultaneousOutput, key: Key.simultaneousOutput) } }
+    @Published var appAudioEffectsEnabled: Bool? { didSet { persist(appAudioEffectsEnabled, key: Key.appAudioEffects) } }
+    @Published var menuBarBatterySource: MenuBarBatterySource? { didSet { persist(menuBarBatterySource?.storageValue, key: Key.menuBarBatterySource) } }
+    @Published var showMenuBarDeviceIcon: Bool? { didSet { persist(showMenuBarDeviceIcon, key: Key.menuBarDeviceIcon) } }
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
-        language = AppLanguage(rawValue: defaults.string(forKey: Key.language) ?? "") ?? .system
-        appearance = AppAppearance(rawValue: defaults.string(forKey: Key.appearance) ?? "") ?? .system
-        // 耳机控制、多设备输出、应用音效与菜单栏电量都是可选能力，首次启动默认关闭。
-        showHeadphoneControls = defaults.object(forKey: Key.headphones) as? Bool ?? false
-        showSimultaneousOutput = defaults.object(forKey: Key.simultaneousOutput) as? Bool ?? false
-        appAudioEffectsEnabled = defaults.object(forKey: Key.appAudioEffects) as? Bool ?? false
-        showMenuBarDeviceIcon = defaults.object(forKey: Key.menuBarDeviceIcon) as? Bool ?? false
-        if let stored = defaults.string(forKey: Key.menuBarBatterySource),
-           let source = MenuBarBatterySource(storageValue: stored) {
-            menuBarBatterySource = source
-        } else if let legacyEnabled = defaults.object(forKey: Key.legacyCurrentDeviceBattery) as? Bool {
-            // 旧版本只有一个布尔开关：明确映射为关闭或跟随当前输出，不推断固定设备。
-            let migrated: MenuBarBatterySource = legacyEnabled ? .currentOutput : .off
-            menuBarBatterySource = migrated
-            defaults.set(migrated.storageValue, forKey: Key.menuBarBatterySource)
-        } else {
-            menuBarBatterySource = .off
+        var errors: [String: String] = [:]
+        language = Self.read(defaults, key: Key.language, initial: .system, errors: &errors) {
+            guard let raw = $0 as? String else { return nil }; return AppLanguage(rawValue: raw)
         }
+        appearance = Self.read(defaults, key: Key.appearance, initial: .system, errors: &errors) {
+            guard let raw = $0 as? String else { return nil }; return AppAppearance(rawValue: raw)
+        }
+        showHeadphoneControls = Self.read(defaults, key: Key.headphones, initial: false, errors: &errors, decode: Self.boolean)
+        showSimultaneousOutput = Self.read(defaults, key: Key.simultaneousOutput, initial: false, errors: &errors, decode: Self.boolean)
+        appAudioEffectsEnabled = Self.read(defaults, key: Key.appAudioEffects, initial: false, errors: &errors, decode: Self.boolean)
+        showMenuBarDeviceIcon = Self.read(defaults, key: Key.menuBarDeviceIcon, initial: false, errors: &errors, decode: Self.boolean)
+        if defaults.object(forKey: Key.menuBarBatterySource) != nil {
+            // 新记录存在就只能解析新记录；损坏时不读旧键，更不能写回迁移结果。
+            menuBarBatterySource = Self.read(defaults, key: Key.menuBarBatterySource, initial: .off, errors: &errors) {
+                guard let raw = $0 as? String else { return nil }; return MenuBarBatterySource(storageValue: raw)
+            }
+        } else if let legacy = defaults.object(forKey: Key.legacyCurrentDeviceBattery) {
+            if let enabled = Self.boolean(legacy) {
+                let migrated: MenuBarBatterySource = enabled ? .currentOutput : .off
+                menuBarBatterySource = migrated
+                defaults.set(migrated.storageValue, forKey: Key.menuBarBatterySource)
+            } else {
+                menuBarBatterySource = nil
+                errors[Key.menuBarBatterySource] = Key.legacyCurrentDeviceBattery
+            }
+        } else { menuBarBatterySource = .off }
+        readErrors = errors
+    }
+
+    private static func read<Value>(_ defaults: UserDefaults, key: String, initial: Value,
+                                    errors: inout [String: String], decode: (Any) -> Value?) -> Value? {
+        guard let raw = defaults.object(forKey: key) else { return initial }
+        guard let value = decode(raw) else { errors[key] = key; return nil }
+        return value
+    }
+
+    private static func boolean(_ raw: Any) -> Bool? {
+        guard let number = raw as? NSNumber, CFGetTypeID(number) == CFBooleanGetTypeID() else { return nil }
+        return number.boolValue
+    }
+
+    private func persist(_ value: Any?, key: String) {
+        guard let value else { return }
+        defaults.set(value, forKey: key)
+        readErrors.removeValue(forKey: key)
     }
 
     var resolvedLanguage: AppLanguage {
-        language.resolved()
+        // 设置损坏时没有已选语言。这里只决定如何绘制错误界面，不把系统语言写成已恢复的配置。
+        guard let language else { return AppLanguage.system.resolved() }
+        return language.resolved()
     }
 
     func localized(_ key: String) -> String {
@@ -122,7 +139,7 @@ final class AppSettings: ObservableObject {
     }
 
     func applyApplicationAppearance() {
-        NSApp?.appearance = appearance.nsAppearance
+        NSApp?.appearance = appearance?.nsAppearance
     }
 }
 
@@ -291,6 +308,20 @@ enum L10n {
             "Could not open System Settings. Open Privacy & Security → Screen & System Audio Recording manually.",
         "复制耳机诊断": "Copy Headphone Diagnostics",
         "退出 Aural": "Quit Aural",
+        "重新读取路由配置": "Reload routing configuration",
+        "重新读取预设": "Reload presets",
+        "音效预设无法读取，请检查本地设置": "Effect presets could not be read. Check local settings.",
+        "音效预设无法保存，请检查本地设置": "Effect presets could not be saved. Check local settings.",
+        "更新残留": "Update remnants",
+        "检查并清理…": "Inspect and Clean…",
+        "没有需要清理的失效挂载标记": "No stale mount record needs cleanup.",
+        "清理失效挂载标记？": "Remove the stale mount record?",
+        "已确认相关镜像未连接。仅移除失效标记，不删除旧版本备份或安装包。": "The relevant image is not attached. Only the stale record will be removed; backups and installer files are kept.",
+        "清理": "Clean Up",
+        "失效挂载标记已清理，可重新下载更新": "The stale mount record was removed. You can download the update again.",
+        "无法清理更新残留": "Could Not Clean Update Remnants",
+        "重新读取音效配置": "Reload effects configuration",
+        "设置读取失败，请重新选择": "Settings could not be read. Select them again.",
         "音频资源尚未完整释放": "Audio resources have not been fully released",
         "仍然退出会结束 Aural 的音频处理，应用原声可能恢复，残留多输出设备可能需要手动移除。": "Quitting will end Aural's audio processing. Original app audio may resume, and remaining multi-output devices may need manual removal.",
         "仍然退出": "Quit Anyway",

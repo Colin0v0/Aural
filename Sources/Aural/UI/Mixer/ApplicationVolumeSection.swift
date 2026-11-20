@@ -27,8 +27,16 @@ struct ApplicationVolumeSection: View {
                 VStack(spacing: 0) {
                     if let error = model.appAudioRoutePersistenceError {
                         PanelError(text: L10n.text(error, language: language)).padding(16)
+                        if !model.applicationRouteConfigurationAvailable {
+                            Button(L10n.text("重新读取路由配置", language: language)) { model.reloadApplicationAudioRoutes() }
+                                .buttonStyle(PanelButtonStyle())
+                        }
                     }
                     // 持久化错误由主面板顶部统一显示，APP 区不重复撑高菜单栏浮层。
+                    if !model.applicationEffectConfigurationAvailable || !model.applicationEffectPresetsAvailable {
+                        Button(L10n.text("重新读取音效配置", language: language)) { model.reloadApplicationAudioEffects() }
+                            .buttonStyle(PanelButtonStyle())
+                    }
                     if let error = model.processError {
                         PanelError(text: L10n.text(error, language: language)).padding(16)
                     }
@@ -86,12 +94,15 @@ struct ApplicationVolumeSection: View {
                             setAudioRoute: { model.setApplicationAudioRoute($0, for: app.id) },
                             toggleRouteOutput: { model.toggleApplicationAudioRouteDevice($0, for: app.id) })
             // 只禁用 APP 音频处理；上方硬件音量、设备切换和麦克风控制仍可使用。
-            .disabled(!model.audioCaptureAccess.allowsApplicationAudio)
+            .disabled(!model.audioCaptureAccess.allowsApplicationAudio || !model.applicationRouteConfigurationAvailable)
     }
 
     private func status(for app: ApplicationAudioRow, state: ApplicationMixState) -> String {
         if !model.audioCaptureAccess.allowsApplicationAudio {
             return L10n.text("系统音频录制尚未授权", language: language)
+        }
+        if !model.applicationRouteConfigurationAvailable {
+            return L10n.text("应用路由配置无法读取，请检查本地设置", language: language)
         }
         if state.failure != nil { return L10n.text("未应用；请从选项中重新应用", language: language) }
         if model.processError != nil { return L10n.text("音频状态不可用", language: language) }

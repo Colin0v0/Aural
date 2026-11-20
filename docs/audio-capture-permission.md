@@ -10,7 +10,7 @@ The microphone page reads and changes input-device hardware properties. It does 
 
 ## Current startup behavior
 
-The source of truth is [StartupPermissions.swift](../Sources/Aural/StartupPermissions.swift) and [AuralApp.swift](../Sources/Aural/AuralApp.swift):
+The source of truth is [StartupPermissions.swift](../Sources/Aural/App/StartupPermissions.swift) and [AuralApp.swift](../Sources/Aural/App/AuralApp.swift):
 
 - Read the current authorization status on startup, not just an “asked before” preference. Either an explicit system-audio grant or a screen-capture grant is accepted for app-audio access.
 - When access is not authorized, request it once through macOS. The system decides whether to display a prompt; Aural does not modify TCC permissions itself.

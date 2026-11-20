@@ -23,6 +23,6 @@ swift build --build-tests -Xswiftc -load-plugin-library -Xswiftc "$TESTING_PLUGI
 swift test --skip-build --no-parallel -Xswiftc -load-plugin-library -Xswiftc "$TESTING_PLUGIN" \
     -Xswiftc -sdk -Xswiftc "$SDK_PATH"
 AURAL_BUILD_CONFIGURATION=release ./Scripts/build-app.sh
-codesign --verify --strict dist/Aural.app
+codesign --verify --strict "${AURAL_BUILD_OUTPUT_ROOT:-dist/build}/release/Aural.app"
 
 printf 'CI 检查通过：单元测试、Release 构建和签名校验均成功。\n'

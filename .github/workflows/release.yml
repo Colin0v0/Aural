@@ -30,7 +30,7 @@ jobs:
       - name: 完整检查
         run: ./Scripts/check-ci.sh
       - name: 验证 DMG 与旧版更新 ZIP
-        run: ./Scripts/build-release-assets.sh
+        run: AURAL_DMG_LAYOUT=plain ./Scripts/build-release-assets.sh
 
   detect:
     if: github.event_name == 'push'
@@ -122,11 +122,11 @@ jobs:
           VERSION: ${{ needs.detect.outputs.version }}
         run: |
           set -euo pipefail
-          ./Scripts/build-release-assets.sh
-          DMG="dist/Aural-${VERSION}-macOS-arm64.dmg"
+          AURAL_DMG_LAYOUT=plain ./Scripts/build-release-assets.sh
+          DMG="dist/releases/${VERSION}/arm64/Aural-${VERSION}-macOS-arm64.dmg"
           test -f "$DMG"
           test -f "$DMG.sha256"
-          ZIP="dist/Aural-${VERSION}-macOS-arm64.zip"
+          ZIP="dist/releases/${VERSION}/arm64/Aural-${VERSION}-macOS-arm64.zip"
           test -f "$ZIP"
           test -f "$ZIP.sha256"
           echo "dmg=$DMG" >> "$GITHUB_OUTPUT"

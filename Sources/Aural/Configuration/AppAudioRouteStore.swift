@@ -26,7 +26,9 @@ final class AppAudioRouteStore {
 
     /// 没有记录是首次使用的正常状态；只有已存在的记录解码失败才明确报错。
     func load() throws -> [String: AppAudioRoute] {
-        guard let data = defaults.data(forKey: Self.key) else { return [:] }
+        guard let value = defaults.object(forKey: Self.key) else { return [:] }
+        // 已存在但类型不对是损坏记录，不能冒充首次使用而解除全部路由限制。
+        guard let data = value as? Data else { throw AppAudioRouteStoreError.readFailed }
         do {
             let routes = try JSONDecoder().decode([String: AppAudioRoute].self, from: data)
             guard routes.keys.allSatisfy({ $0.hasPrefix("bundle:") }) else {

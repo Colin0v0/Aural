@@ -116,7 +116,7 @@ Requires a Swift 6 toolchain and macOS 15.4 or later:
 git clone https://github.com/Colin0v0/Aural.git
 cd Aural
 ./Scripts/check.sh
-open dist/Aural.app
+open dist/build/debug/Aural.app
 ```
 
 `check.sh` runs tests, builds the app, checks the local signature, and reads output/input diagnostics on the host Mac. Hardware-independent release checks run in [GitHub Actions](https://github.com/Colin0v0/Aural/actions/workflows/release.yml). A green build is evidence of those checks, not Apple certification or complete hardware acceptance.

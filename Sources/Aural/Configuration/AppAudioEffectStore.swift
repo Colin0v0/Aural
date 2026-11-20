@@ -4,6 +4,8 @@ import AuralCore
 enum AppAudioEffectStoreError: LocalizedError {
     case readFailed
     case writeFailed
+    case presetsReadFailed
+    case presetsWriteFailed
 
     var errorDescription: String? {
         switch self {
@@ -11,6 +13,10 @@ enum AppAudioEffectStoreError: LocalizedError {
             return "应用音效配置无法读取，请检查本地设置"
         case .writeFailed:
             return "应用音效配置无法保存，请检查本地设置"
+        case .presetsReadFailed:
+            return "音效预设无法读取，请检查本地设置"
+        case .presetsWriteFailed:
+            return "音效预设无法保存，请检查本地设置"
         }
     }
 }
@@ -26,7 +32,8 @@ final class AppAudioEffectStore {
     }
 
     func load() throws -> [String: AppAudioEffectSettings] {
-        guard let data = defaults.data(forKey: Self.key) else { return [:] }
+        guard let raw = defaults.object(forKey: Self.key) else { return [:] }
+        guard let data = raw as? Data else { throw AppAudioEffectStoreError.readFailed }
         do {
             let settings = try JSONDecoder().decode([String: AppAudioEffectSettings].self, from: data)
             guard settings.keys.allSatisfy({ $0.hasPrefix("bundle:") }),
@@ -61,17 +68,18 @@ final class AppAudioEffectStore {
 
     /// 自定义预设属于整个应用，而不是某个具体 App；窗口和所有应用行共享同一份预设库。
     func loadPresets() throws -> [AppAudioEffectCustomPreset] {
-        guard let data = defaults.data(forKey: Self.presetsKey) else { return [] }
+        guard let raw = defaults.object(forKey: Self.presetsKey) else { return [] }
+        guard let data = raw as? Data else { throw AppAudioEffectStoreError.presetsReadFailed }
         do {
             let presets = try JSONDecoder().decode([AppAudioEffectCustomPreset].self, from: data)
             guard presets.allSatisfy(\.isValid),
                   Set(presets.map(\.id)).count == presets.count,
                   Set(presets.map(\.name)).count == presets.count else {
-                throw AppAudioEffectStoreError.readFailed
+                throw AppAudioEffectStoreError.presetsReadFailed
             }
             return presets
         } catch {
-            throw AppAudioEffectStoreError.readFailed
+            throw AppAudioEffectStoreError.presetsReadFailed
         }
     }
 
@@ -79,14 +87,14 @@ final class AppAudioEffectStore {
         guard presets.allSatisfy(\.isValid),
               Set(presets.map(\.id)).count == presets.count,
               Set(presets.map(\.name)).count == presets.count else {
-            throw AppAudioEffectStoreError.writeFailed
+            throw AppAudioEffectStoreError.presetsWriteFailed
         }
         do {
             let encoder = JSONEncoder()
             encoder.outputFormatting = [.sortedKeys]
             defaults.set(try encoder.encode(presets), forKey: Self.presetsKey)
         } catch {
-            throw AppAudioEffectStoreError.writeFailed
+            throw AppAudioEffectStoreError.presetsWriteFailed
         }
     }
 }
