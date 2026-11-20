@@ -16,7 +16,7 @@ Those checks exercise state machines, synthetic PCM, protocol fixtures, UI layou
 
 ### Custom routes are not privacy isolation
 
-**Published 0.3.8:** the [released resolver](https://github.com/Colin0v0/Auxmo/blob/v0.3.8/Sources/AuralCore/AppAudioRoute.swift) can use All Outputs if every custom target is unavailable, or normalize the saved route when a member is removed. A group containing speakers can therefore play audio externally. Do not treat that release as a fail-closed routing boundary.
+**Published 0.3.8:** the released resolver can use All Outputs if every custom target is unavailable, or normalize the saved route when a member is removed. A group containing speakers can therefore play audio externally. Do not treat that release as a fail-closed routing boundary.
 
 **0.3.9 and later:** [the current resolver](../Sources/AuxmoCore/AppAudioRoute.swift) keeps the complete saved selection and explicitly reports `waitingForDevices` when none of its targets are active. The model suspends replay, retains an unbound continuously muted tap, and resumes only on a confirmed selected target. A newly registered app with an unavailable saved route starts a mute-only session, not a temporary speaker playback chain. Other apps explicitly using All Outputs are unaffected.
 
